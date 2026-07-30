@@ -15,6 +15,13 @@ public sealed class CoreTests
         Assert.Equal(2, result.Count); Assert.Equal("Pixel 9", result[0].Model); Assert.Equal("unauthorized", result[1].State);
     }
 
+    [Fact]
+    public void Google_oauth_client_secret_json_is_supported()
+    {
+        var value = OAuthConfiguration.Parse("""{"installed":{"client_id":"demo.apps.googleusercontent.com","client_secret":"demo-secret"}}""");
+        Assert.Equal(("demo.apps.googleusercontent.com", "demo-secret"), value);
+    }
+
     [Theory]
     [InlineData("{\"ready\":true}", "json")]
     [InlineData("import pathlib\nprint(pathlib.Path.cwd())", "py")]

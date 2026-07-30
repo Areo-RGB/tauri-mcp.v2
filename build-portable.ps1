@@ -25,5 +25,8 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Copy-Item -LiteralPath (Join-Path $hostTemp 'chapter-clipper-native-host.exe') -Destination $output -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'winforms\chrome-extension\chapter-clipper') -Destination (Join-Path $output 'chrome-extension') -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'install-chrome-native-host.ps1') -Destination $output -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot 'winforms\oauth-config.example.json') -Destination $output -Force
+$oauthConfig = Join-Path $projectRoot 'winforms\client_secret.json'
+if (Test-Path -LiteralPath $oauthConfig) { Copy-Item -LiteralPath $oauthConfig -Destination (Join-Path $output 'client_secret.json') -Force }
 Remove-Item -LiteralPath $hostTemp -Recurse -Force
 Write-Host "Portable WinForms build: $output" -ForegroundColor Green

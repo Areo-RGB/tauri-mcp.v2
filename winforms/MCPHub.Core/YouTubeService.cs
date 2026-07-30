@@ -151,10 +151,7 @@ public sealed partial class YouTubeService(ICommandRunner runner, HttpClient cli
     }
 
     private static (string Id, string Secret) OAuthConfig()
-    {
-        var id = Environment.GetEnvironmentVariable("GOOGLE_CLIENT_ID"); var secret = Environment.GetEnvironmentVariable("GOOGLE_CLIENT_SECRET");
-        if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(secret)) throw new InvalidOperationException("Google OAuth configuration is missing. Add it to .env."); return (id, secret);
-    }
+        => OAuthConfiguration.Load();
     private static void SaveToken(StoredToken token) { Directory.CreateDirectory(Path.GetDirectoryName(TokenPath)!); File.WriteAllText(TokenPath, JsonSerializer.Serialize(token, JsonDefaults.Options)); }
     private static int FreePort() { var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0); listener.Start(); var port = ((IPEndPoint)listener.LocalEndpoint).Port; listener.Stop(); return port; }
     private static string Form(IDictionary<string, string> values) => string.Join('&', values.Select(x => $"{Uri.EscapeDataString(x.Key)}={Uri.EscapeDataString(x.Value)}"));

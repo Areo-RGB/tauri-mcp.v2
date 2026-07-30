@@ -9,6 +9,10 @@ Native Windows desktop control center for ADB/Scrcpy, YouTube chapter processing
 - Live clipboard editor, format detection, Desktop saving, session history, and supported script execution.
 - Chapter Clipper Chrome extension connected through a C# native-messaging host.
 
+## YouTube OAuth
+
+Place Google’s downloaded `client_secret.json` beside `MCPHub.exe` (or in `%APPDATA%\MCPHub`), then choose **Connect** in the YouTube tab. The portable folder includes `oauth-config.example.json` as a shape reference. Environment variables `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are also supported.
+
 
 ## Development
 
