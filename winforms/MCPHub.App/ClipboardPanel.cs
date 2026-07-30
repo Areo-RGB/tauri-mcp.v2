@@ -11,7 +11,7 @@ internal sealed class ClipboardPanel : UserControl
     public ClipboardPanel(ClipboardService service, CancellationToken token)
     {
         _service = service; _token = token; var toolbar = Ui.Row(); toolbar.Controls.Add(Ui.Label("Clipboard Saver", true)); toolbar.Controls.Add(_type);
-        toolbar.Controls.AddRange([Ui.Button("Save to Desktop", (_, _) => Save(), 118), Ui.Button("Run", async (_, _) => await RunCode(), 64), Ui.Button("Copy", (_, _) => CopyBack(), 64), Ui.Button("Refresh", (_, _) => RefreshClipboard(true), 74)]); toolbar.Controls.Add(_live); toolbar.Controls.Add(_status);
+        toolbar.Controls.AddRange([Ui.Button("Save to &Desktop", (_, _) => Save(), 118), Ui.Button("&Run", async (_, _) => await RunCode(), 64), Ui.Button("&Copy", (_, _) => CopyBack(), 64), Ui.Button("&Refresh", (_, _) => RefreshClipboard(true), 74)]); toolbar.Controls.Add(_live); toolbar.Controls.Add(_status);
         var split = new SplitContainer { Dock = DockStyle.Fill, SplitterDistance = 840 }; split.Panel1.Controls.Add(_editor); split.Panel2.Controls.Add(Ui.Group("Session history", _history)); Controls.Add(split); Controls.Add(toolbar);
         _editor.TextChanged += (_, _) => { _type.Text = "." + ClipboardService.DetectExtension(_editor.Text); }; _history.DoubleClick += (_, _) => { if (_history.SelectedItem is Entry e) _editor.Text = e.Text; };
         Load += (_, _) => { RefreshClipboard(true); _timer.Start(); }; _timer.Tick += (_, _) => { if (_live.Checked && !_busy && _editor.Text == _lastClipboard) RefreshClipboard(false); }; Disposed += (_, _) => _timer.Dispose();
