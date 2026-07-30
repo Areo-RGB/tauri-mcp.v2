@@ -1,0 +1,31 @@
+name: Electron Windows
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  portable:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.12.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - run: pnpm check
+      - run: pnpm build
+      - run: pnpm electron:build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MCPHub-Frontend-portable
+          path: dist-electron/MCPHub-Frontend.exe
+          if-no-files-found: error
