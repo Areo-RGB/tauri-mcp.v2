@@ -1,5 +1,16 @@
 Always comit and push
 
+## Shell
+
+This WSL project uses the Windows Rust toolchain. The command runner may start
+non-login Bash, so run Cargo commands through a login shell:
+
+```bash
+bash -lc 'cd /mnt/c/Users/paul/projects/mcp_UI/tauri-mcp/src-tauri && cargo check --all-targets'
+```
+
+Do not use PowerShell for routine Cargo checks.
+
 You are able to use the Svelte MCP server, where you have access to comprehensive Svelte 5 and SvelteKit documentation. Here's how to use the available tools effectively:
 The @sveltejs/mcp npm package normally launches the local stdio MCP server:
 
