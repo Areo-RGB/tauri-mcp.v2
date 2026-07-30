@@ -12,7 +12,7 @@ Native Windows desktop control center for ADB/Scrcpy, YouTube chapter processing
 
 ## Development
 
-Requirements: Windows x64, .NET 10 SDK, and Microsoft Edge WebView2 Runtime. External workflows additionally use their existing tools on `PATH` and the machine-specific paths preserved in `MCPHub.Core/AppConstants.cs`.
+Requirements: Windows x64 and .NET 10 SDK. External workflows additionally use their existing tools on `PATH` and the machine-specific paths preserved in `MCPHub.Core/AppConstants.cs`.
 
 ```powershell
 dotnet restore .\winforms\MCPHub.slnx
@@ -28,7 +28,7 @@ Run `build-portable.bat` or `build-portable.ps1`. The self-contained output is w
 dist-portable\MCPHub-WinForms
 ```
 
-The folder contains `MCPHub.exe`, the C# native host, the unpacked Chrome extension, WebView2 support files, and the native-host installer.
+The folder contains `MCPHub.exe`, the C# native host, the unpacked Chrome extension, and the native-host installer.
 
 ## Chrome extension
 
