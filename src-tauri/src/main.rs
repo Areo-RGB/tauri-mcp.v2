@@ -534,6 +534,22 @@ fn scrcpy_executable() -> Result<PathBuf, String> {
         .ok_or_else(|| "scrcpy was not found on PATH.".to_string())
 }
 
+fn scrcpy_command(executable: &Path) -> Command {
+    let is_script = executable
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| {
+            value.eq_ignore_ascii_case("cmd") || value.eq_ignore_ascii_case("bat")
+        });
+    if is_script {
+        let mut command = Command::new("cmd.exe");
+        command.args(["/D", "/S", "/C"]).arg(executable);
+        command
+    } else {
+        Command::new(executable)
+    }
+}
+
 fn adb_result(command: String, output: std::process::Output) -> AdbCommandResult {
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -553,7 +569,7 @@ fn adb_result(command: String, output: std::process::Output) -> AdbCommandResult
 fn run_adb(args: &[String]) -> Result<AdbCommandResult, String> {
     let executable = adb_executable()?;
     let command = format!("adb {}", args.join(" "));
-    let mut process = Command::new(executable);
+    let mut process = scrcpy_command(&executable);
     process
         .args(args)
         .stdin(Stdio::null())
@@ -638,7 +654,7 @@ fn start_scrcpy_mirror(serials: Vec<String>) -> Result<AdbCommandResult, String>
     let mut lines = Vec::new();
     let mut ok = true;
     for serial in &serials {
-        let mut process = Command::new(&executable);
+        let mut process = scrcpy_command(&executable);
         process.args(["-s", serial]);
         #[cfg(windows)]
         process.creation_flags(CREATE_NO_WINDOW);
