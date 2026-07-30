@@ -1,0 +1,8 @@
+.env
+client_secret.json
+/src-tauri/extensions/
+/node_modules/
+/dist/
+/src-tauri/target/
+/apps/
+*.log

@@ -1,0 +1,36 @@
+[package]
+name = "mcphub-frontend"
+version = "1.1.1"
+description = "Portable MCPHub frontend for Windows"
+authors = ["MCPHub contributors"]
+edition = "2021"
+default-run = "MCPHub-Frontend"
+
+[[bin]]
+name = "MCPHub-Frontend"
+path = "src/main.rs"
+
+[[bin]]
+name = "chapter-clipper-native-host"
+path = "src/bin/chapter-clipper-native-host.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+arboard = "3"
+chrono = "0.4"
+dirs = "6"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = ["unstable"] }
+tauri-plugin-dialog = "2"
+wait-timeout = "0.2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

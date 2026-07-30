@@ -1,0 +1,6 @@
+{
+	"files.associations": {
+		"*.css": "tailwindcss"
+	},
+	"pendant.context.autoAttach": true
+}
