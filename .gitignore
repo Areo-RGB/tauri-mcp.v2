@@ -9,3 +9,4 @@ youtube-data-*.json
 /src-tauri/target/
 /apps/
 *.log
+mediav-460b1be2565e.json
