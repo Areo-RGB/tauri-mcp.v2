@@ -40,23 +40,31 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
     chrome.storage.local.set({ logs: [] }).then(() => respond({ success: true }));
     return true;
   }
-  if (!["process-chapters", "fetch-chapters", "ping"].includes(message?.type)) return false;
+  if (!["process-chapters", "process-upload", "fetch-chapters", "get-playlists", "ping"].includes(message?.type)) return false;
 
   const payload = message.type === "ping"
     ? { action: "ping" }
-    : { action: message.type === "fetch-chapters" ? "fetch-chapters" : "process", ...message.payload };
+    : { action: message.type === "process-chapters" ? "process" : message.type, ...message.payload };
   const label = message.type === "ping"
     ? "Checking MCPHub connection"
     : message.type === "fetch-chapters"
       ? "Fetching chapters with yt-dlp"
+      : message.type === "get-playlists"
+        ? "Loading YouTube playlists"
+        : message.type === "process-upload"
+          ? `Processing and uploading ${payload.chapters?.length || 0} chapter(s)`
       : `Sending ${payload.chapters?.length || 0} chapter(s)`;
   addLog("info", label)
-    .then(() => sendToMcpHub(payload, message.type === "process-chapters" ? 1_800_000 : 60_000))
+    .then(() => sendToMcpHub(payload, ["process-chapters", "process-upload"].includes(message.type) ? 1_800_000 : 60_000))
     .then(async (response) => {
       const successMessage = message.type === "ping"
         ? "MCPHub is connected"
         : message.type === "fetch-chapters"
           ? `yt-dlp found ${response.result?.chapters?.length || 0} chapter(s)`
+          : message.type === "get-playlists"
+            ? `Loaded ${response.result?.length || 0} playlist(s)`
+            : message.type === "process-upload"
+              ? `Uploaded ${response.result?.uploaded?.clips?.length || 0} clip(s)`
           : "Processing completed";
       await addLog(response.success ? "success" : "error", response.success ? successMessage : response.error);
       respond(response);

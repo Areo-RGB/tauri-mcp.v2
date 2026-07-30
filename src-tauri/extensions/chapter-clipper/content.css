@@ -9,6 +9,31 @@
   color: white;
 }
 .mcphub-clipper-button:disabled { opacity: .6; }
+.mcphub-playlist-select {
+  max-width: 180px;
+  height: 32px;
+  margin-left: 8px;
+  padding: 0 28px 0 10px;
+  border: 1px solid #d3d3d3;
+  border-radius: 8px;
+  background: var(--yt-spec-base-background, white);
+  color: var(--yt-spec-text-primary, #0f0f0f);
+  font: 500 13px Roboto, Arial, sans-serif;
+}
+.mcphub-chapter-upload {
+  flex: 0 0 auto;
+  min-width: 66px;
+  height: 32px;
+  margin: auto 8px auto 12px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 16px;
+  cursor: pointer;
+  background: #065fd4;
+  color: white;
+  font: 600 12px Roboto, Arial, sans-serif;
+}
+.mcphub-chapter-upload:disabled { cursor: wait; opacity: .6; }
 .mcphub-clipper-button.mcphub-clipper-floating {
   position: fixed;
   left: 24px;

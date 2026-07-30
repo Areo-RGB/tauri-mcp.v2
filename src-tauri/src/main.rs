@@ -1251,66 +1251,68 @@ fn disconnect_youtube() -> Result<(), String> {
     Ok(())
 }
 
+fn youtube_playlists_inner() -> Result<Vec<YouTubePlaylist>, String> {
+    let token = youtube_access_token()?;
+    let client = Client::new();
+    let mut playlists = Vec::new();
+    let mut page_token = None;
+    loop {
+        let mut query = vec![
+            ("part", "snippet,contentDetails,status"),
+            ("mine", "true"),
+            ("maxResults", "50"),
+        ];
+        if let Some(token) = page_token.as_deref() {
+            query.push(("pageToken", token));
+        }
+        let response = client
+            .get(format!("{YOUTUBE_API_URL}/playlists"))
+            .bearer_auth(&token)
+            .query(&query)
+            .send()
+            .map_err(|error| format!("Could not load YouTube playlists: {error}"))?;
+        let body = response_text(response, "YouTube playlist lookup")?;
+        let value: serde_json::Value = serde_json::from_str(&body)
+            .map_err(|error| format!("YouTube returned invalid playlist data: {error}"))?;
+        if let Some(items) = value.get("items").and_then(serde_json::Value::as_array) {
+            playlists.extend(items.iter().filter_map(|item| {
+                Some(YouTubePlaylist {
+                    id: item.get("id")?.as_str()?.to_string(),
+                    title: item.get("snippet")?.get("title")?.as_str()?.to_string(),
+                    description: item
+                        .get("snippet")?
+                        .get("description")?
+                        .as_str()?
+                        .to_string(),
+                    privacy_status: item
+                        .get("status")?
+                        .get("privacyStatus")?
+                        .as_str()?
+                        .to_string(),
+                    item_count: item
+                        .get("contentDetails")?
+                        .get("itemCount")?
+                        .as_u64()
+                        .unwrap_or(0),
+                })
+            }));
+        }
+        page_token = value
+            .get("nextPageToken")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+        if page_token.is_none() {
+            break;
+        }
+    }
+    Ok(playlists)
+}
+
 #[tauri::command]
 async fn get_youtube_playlists() -> Result<Vec<YouTubePlaylist>, String> {
-    tauri::async_runtime::spawn_blocking(|| {
-        let token = youtube_access_token()?;
-        let client = Client::new();
-        let mut playlists = Vec::new();
-        let mut page_token = None;
-        loop {
-            let mut query = vec![
-                ("part", "snippet,contentDetails,status"),
-                ("mine", "true"),
-                ("maxResults", "50"),
-            ];
-            if let Some(token) = page_token.as_deref() {
-                query.push(("pageToken", token));
-            }
-            let response = client
-                .get(format!("{YOUTUBE_API_URL}/playlists"))
-                .bearer_auth(&token)
-                .query(&query)
-                .send()
-                .map_err(|error| format!("Could not load YouTube playlists: {error}"))?;
-            let body = response_text(response, "YouTube playlist lookup")?;
-            let value: serde_json::Value = serde_json::from_str(&body)
-                .map_err(|error| format!("YouTube returned invalid playlist data: {error}"))?;
-            if let Some(items) = value.get("items").and_then(serde_json::Value::as_array) {
-                playlists.extend(items.iter().filter_map(|item| {
-                    Some(YouTubePlaylist {
-                        id: item.get("id")?.as_str()?.to_string(),
-                        title: item.get("snippet")?.get("title")?.as_str()?.to_string(),
-                        description: item
-                            .get("snippet")?
-                            .get("description")?
-                            .as_str()?
-                            .to_string(),
-                        privacy_status: item
-                            .get("status")?
-                            .get("privacyStatus")?
-                            .as_str()?
-                            .to_string(),
-                        item_count: item
-                            .get("contentDetails")?
-                            .get("itemCount")?
-                            .as_u64()
-                            .unwrap_or(0),
-                    })
-                }));
-            }
-            page_token = value
-                .get("nextPageToken")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string);
-            if page_token.is_none() {
-                break;
-            }
-        }
-        Ok(playlists)
-    })
-    .await
-    .map_err(|error| format!("YouTube playlist task failed: {error}"))?
+    tauri::async_runtime::spawn_blocking(youtube_playlists_inner)
+        .await
+        .map_err(|error| format!("YouTube playlist task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -1439,51 +1441,54 @@ fn upload_youtube_clip(
         .ok_or_else(|| format!("YouTube did not return a video ID for {}.", clip.title))
 }
 
+fn upload_youtube_clips_inner(
+    playlist_id: String,
+    clips: Vec<YouTubeUploadClip>,
+) -> Result<YouTubeUploadResult, String> {
+    if playlist_id.trim().is_empty() {
+        return Err("Select a YouTube playlist first.".to_string());
+    }
+    if clips.is_empty() {
+        return Err("Create clips before uploading them to YouTube.".to_string());
+    }
+    let token = youtube_access_token()?;
+    let client = Client::new();
+    let mut uploaded = Vec::new();
+    for clip in &clips {
+        let video_id = upload_youtube_clip(&client, &token, clip)?;
+        let response = client
+            .post(format!("{YOUTUBE_API_URL}/playlistItems"))
+            .bearer_auth(&token)
+            .query(&[("part", "snippet")])
+            .json(&serde_json::json!({
+                "snippet": {
+                    "playlistId": playlist_id,
+                    "resourceId": { "kind": "youtube#video", "videoId": video_id }
+                }
+            }))
+            .send()
+            .map_err(|error| format!("Could not add {} to the playlist: {error}", clip.title))?;
+        response_text(response, &format!("Adding {} to the playlist", clip.title))?;
+        uploaded.push(YouTubeUploadedClip {
+            title: clip.title.clone(),
+            url: format!("https://www.youtube.com/watch?v={video_id}"),
+            video_id,
+        });
+    }
+    Ok(YouTubeUploadResult {
+        playlist_id,
+        clips: uploaded,
+    })
+}
+
 #[tauri::command]
 async fn upload_youtube_clips(
     playlist_id: String,
     clips: Vec<YouTubeUploadClip>,
 ) -> Result<YouTubeUploadResult, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        if playlist_id.trim().is_empty() {
-            return Err("Select a YouTube playlist first.".to_string());
-        }
-        if clips.is_empty() {
-            return Err("Create clips before uploading them to YouTube.".to_string());
-        }
-        let token = youtube_access_token()?;
-        let client = Client::new();
-        let mut uploaded = Vec::new();
-        for clip in &clips {
-            let video_id = upload_youtube_clip(&client, &token, clip)?;
-            let response = client
-                .post(format!("{YOUTUBE_API_URL}/playlistItems"))
-                .bearer_auth(&token)
-                .query(&[("part", "snippet")])
-                .json(&serde_json::json!({
-                    "snippet": {
-                        "playlistId": playlist_id,
-                        "resourceId": { "kind": "youtube#video", "videoId": video_id }
-                    }
-                }))
-                .send()
-                .map_err(|error| {
-                    format!("Could not add {} to the playlist: {error}", clip.title)
-                })?;
-            response_text(response, &format!("Adding {} to the playlist", clip.title))?;
-            uploaded.push(YouTubeUploadedClip {
-                title: clip.title.clone(),
-                url: format!("https://www.youtube.com/watch?v={video_id}"),
-                video_id,
-            });
-        }
-        Ok(YouTubeUploadResult {
-            playlist_id,
-            clips: uploaded,
-        })
-    })
-    .await
-    .map_err(|error| format!("YouTube upload task failed: {error}"))?
+    tauri::async_runtime::spawn_blocking(move || upload_youtube_clips_inner(playlist_id, clips))
+        .await
+        .map_err(|error| format!("YouTube upload task failed: {error}"))?
 }
 
 fn youtube_output_dir() -> PathBuf {
@@ -1862,6 +1867,7 @@ struct ChapterClipperSocketRequest {
     action: Option<String>,
     url: Option<String>,
     chapters: Option<Vec<YouTubeChapter>>,
+    playlist_id: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -1963,6 +1969,65 @@ fn start_chapter_clipper_socket(
                                         *latest = Some(info.clone());
                                     }
                                     serde_json::json!({ "success": true, "result": info })
+                                }
+                                Err(error) => {
+                                    chapter_clipper_log(&logs, "error", &error);
+                                    serde_json::json!({ "success": false, "error": error })
+                                }
+                            }
+                        }
+                        Ok(request) if request.action.as_deref() == Some("get-playlists") => {
+                            chapter_clipper_log(&logs, "info", "Loading YouTube playlists");
+                            match youtube_playlists_inner() {
+                                Ok(playlists) => {
+                                    chapter_clipper_log(
+                                        &logs,
+                                        "success",
+                                        format!("Loaded {} YouTube playlist(s)", playlists.len()),
+                                    );
+                                    serde_json::json!({ "success": true, "result": playlists })
+                                }
+                                Err(error) => {
+                                    chapter_clipper_log(&logs, "error", &error);
+                                    serde_json::json!({ "success": false, "error": error })
+                                }
+                            }
+                        }
+                        Ok(request) if request.action.as_deref() == Some("process-upload") => {
+                            let url = request.url.unwrap_or_default();
+                            let chapters = request.chapters.unwrap_or_default();
+                            let playlist_id = request.playlist_id.unwrap_or_default();
+                            chapter_clipper_log(
+                                &logs,
+                                "info",
+                                format!("Processing and uploading {} chapter(s)", chapters.len()),
+                            );
+                            match process_youtube_video_inner(url, chapters).and_then(|processed| {
+                                let clips = processed
+                                    .clips
+                                    .iter()
+                                    .map(|clip| YouTubeUploadClip {
+                                        title: clip.title.clone(),
+                                        file_path: clip.file_path.clone(),
+                                        description: None,
+                                    })
+                                    .collect();
+                                upload_youtube_clips_inner(playlist_id, clips)
+                                    .map(|uploaded| (processed, uploaded))
+                            }) {
+                                Ok((processed, uploaded)) => {
+                                    chapter_clipper_log(
+                                        &logs,
+                                        "success",
+                                        format!(
+                                            "Uploaded {} clip(s) to YouTube",
+                                            uploaded.clips.len()
+                                        ),
+                                    );
+                                    serde_json::json!({
+                                        "success": true,
+                                        "result": { "processed": processed, "uploaded": uploaded }
+                                    })
                                 }
                                 Err(error) => {
                                     chapter_clipper_log(&logs, "error", &error);

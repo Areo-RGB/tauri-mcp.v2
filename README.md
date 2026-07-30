@@ -87,6 +87,13 @@ folder is moved into the `vgl2014er` Google Drive mounted at
 use a different mounted Drive or rclone mount. Existing folders are preserved;
 repeat downloads receive a numeric suffix.
 
+The bundled Chapter Clipper Chrome extension adds a playlist selector beside
+YouTube's Transcript tab and an Upload button to every chapter row. Keep MCPHub
+running, select a playlist, and click a chapter's button to download the source,
+cut that chapter, move the files to Google Drive, upload the clip privately, and
+add it to the selected playlist. The panel-level button runs the same workflow
+for every chapter.
+
 Enable the YouTube Data API v3 in a Google Cloud project and create a desktop
 OAuth client. Put the client values in the project `.env` as
 `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. In YouTube Clipper, choose
