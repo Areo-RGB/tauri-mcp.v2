@@ -4,8 +4,8 @@ namespace MCPHub.App;
 
 internal sealed class AdbPanel : UserControl
 {
-    private readonly AdbService _service; private readonly CancellationToken _token; private readonly CheckedListBox _devices = new() { Dock = DockStyle.Fill, CheckOnClick = true };
-    private readonly TextBox _output = Ui.LogBox(); private readonly TextBox _apk = new() { Width = 520 }; private readonly CheckBox _screenOff = new() { Text = "Start mirrors with screen off", AutoSize = true, Margin = new(8) };
+    private readonly AdbService _service; private readonly CancellationToken _token; private readonly CheckedListBox _devices = new() { Dock = DockStyle.Fill, CheckOnClick = true, AccessibleName = "Connected Android devices", AccessibleDescription = "Select one or more ready devices." };
+    private readonly TextBox _output = Ui.LogBox(); private readonly TextBox _apk = new() { Width = 520, AccessibleName = "APK file path" }; private readonly CheckBox _screenOff = new() { Text = "Start mirrors with screen off", AutoSize = true, Margin = new(8), AccessibleName = "Start mirrors with screen off" };
     private readonly List<AdbDevice> _items = [];
     public AdbPanel(AdbService service, CancellationToken token)
     {

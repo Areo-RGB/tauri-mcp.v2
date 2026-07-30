@@ -6,10 +6,10 @@ namespace MCPHub.App;
 internal sealed class YouTubePanel : UserControl
 {
     private readonly YouTubeService _service; private readonly ExtensionDispatcher _dispatcher; private readonly CancellationToken _token;
-    private readonly TextBox _url = new() { Width = 620 }; private readonly CheckedListBox _chapters = new() { Dock = DockStyle.Fill, CheckOnClick = true };
-    private readonly TextBox _custom = new() { Dock = DockStyle.Fill, Multiline = true, ScrollBars = ScrollBars.Vertical, Font = new Font("Consolas", 9f) };
-    private readonly TextBox _activity = Ui.LogBox(); private readonly Label _status = Ui.Label("Ready"); private readonly ComboBox _playlists = new() { Width = 280, DropDownStyle = ComboBoxStyle.DropDownList };
-    private readonly TextBox _playlistTitle = new() { Width = 180 }; private readonly ComboBox _privacy = new() { Width = 90, DropDownStyle = ComboBoxStyle.DropDownList };
+    private readonly TextBox _url = new() { Width = 620, AccessibleName = "YouTube video URL" }; private readonly CheckedListBox _chapters = new() { Dock = DockStyle.Fill, CheckOnClick = true, AccessibleName = "Video chapters" };
+    private readonly TextBox _custom = new() { Dock = DockStyle.Fill, Multiline = true, ScrollBars = ScrollBars.Vertical, Font = new Font("Consolas", 9f), AccessibleName = "Custom chapter timestamps" };
+    private readonly TextBox _activity = Ui.LogBox(); private readonly Label _status = Ui.Label("Ready"); private readonly ComboBox _playlists = new() { Width = 280, DropDownStyle = ComboBoxStyle.DropDownList, AccessibleName = "YouTube playlist" };
+    private readonly TextBox _playlistTitle = new() { Width = 180, AccessibleName = "New playlist title" }; private readonly ComboBox _privacy = new() { Width = 90, DropDownStyle = ComboBoxStyle.DropDownList, AccessibleName = "Playlist privacy" };
     private readonly List<YouTubeChapter> _items = []; private YouTubeVideoInfo? _video; private YouTubeProcessResult? _result; private IReadOnlyList<YouTubePlaylist> _playlistItems = [];
     public YouTubePanel(YouTubeService service, ExtensionDispatcher dispatcher, CancellationToken token)
     {

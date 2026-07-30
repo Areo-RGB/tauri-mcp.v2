@@ -5,6 +5,8 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationDefaultFont>Segoe UI, 9pt</ApplicationDefaultFont>
     <ApplicationIcon>Assets\icon.ico</ApplicationIcon>
     <AssemblyName>MCPHub</AssemblyName>
     <RootNamespace>MCPHub.App</RootNamespace>

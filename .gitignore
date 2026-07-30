@@ -14,3 +14,4 @@ mediav-460b1be2565e.json
 /winforms/**/obj/
 /winforms/*.pdf
 /dist-portable/
+.firecrawl/

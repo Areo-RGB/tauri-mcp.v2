@@ -5,8 +5,8 @@ namespace MCPHub.App;
 internal sealed class ClipboardPanel : UserControl
 {
     private sealed record Entry(string Text, string Extension, DateTime CapturedAt) { public override string ToString() => $".{Extension} · {CapturedAt:HH:mm:ss} · {Text.ReplaceLineEndings(" ").Trim()[..Math.Min(48, Text.Trim().Length)]}"; }
-    private readonly ClipboardService _service; private readonly CancellationToken _token; private readonly TextBox _editor = new() { Dock = DockStyle.Fill, Multiline = true, AcceptsTab = true, ScrollBars = ScrollBars.Both, WordWrap = false, Font = new Font("Consolas", 10f) };
-    private readonly ListBox _history = new() { Dock = DockStyle.Fill }; private readonly Label _status = Ui.Label("Reading the Windows clipboard…"); private readonly Label _type = Ui.Label(".txt", true); private readonly CheckBox _live = new() { Text = "Live", Checked = true, AutoSize = true, Margin = new(8) };
+    private readonly ClipboardService _service; private readonly CancellationToken _token; private readonly TextBox _editor = new() { Dock = DockStyle.Fill, Multiline = true, AcceptsTab = true, ScrollBars = ScrollBars.Both, WordWrap = false, Font = new Font("Consolas", 10f), AccessibleName = "Clipboard editor" };
+    private readonly ListBox _history = new() { Dock = DockStyle.Fill, AccessibleName = "Clipboard session history" }; private readonly Label _status = Ui.Label("Reading the Windows clipboard…"); private readonly Label _type = Ui.Label(".txt", true); private readonly CheckBox _live = new() { Text = "Live", Checked = true, AutoSize = true, Margin = new(8), AccessibleName = "Live clipboard polling" };
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 500 }; private string? _lastClipboard; private bool _busy;
     public ClipboardPanel(ClipboardService service, CancellationToken token)
     {
