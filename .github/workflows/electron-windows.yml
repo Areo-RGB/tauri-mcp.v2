@@ -1,6 +1,9 @@
 name: Electron Windows
 
 on:
+  push:
+    branches:
+      - "agent/electron-port-*"
   pull_request:
   workflow_dispatch:
 
