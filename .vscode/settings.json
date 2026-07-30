@@ -2,5 +2,14 @@
 	"files.associations": {
 		"*.css": "tailwindcss"
 	},
-	"pendant.context.autoAttach": true
+	"pendant.context.autoAttach": true,
+	"rust-analyzer.linkedProjects": [
+		"src-tauri/Cargo.toml"
+	],
+	"rust-analyzer.check.command": "clippy",
+	"rust-analyzer.checkOnSave": true,
+	"[rust]": {
+		"editor.defaultFormatter": "rust-lang.rust-analyzer",
+		"editor.formatOnSave": true
+	}
 }

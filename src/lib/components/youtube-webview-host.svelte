@@ -6,6 +6,9 @@
 	let observer: ResizeObserver | undefined;
 	let frame = 0;
 	let error = $state("");
+	let updateRunning = false;
+	let updatePending = false;
+	let requestedVisibility = true;
 
 	function scheduleBounds() {
 		cancelAnimationFrame(frame);
@@ -13,20 +16,32 @@
 	}
 
 	async function updateBounds(visible: boolean) {
-		if (!host && visible) return;
-		const bounds = host?.getBoundingClientRect() ?? { x: 0, y: 0, width: 1, height: 1 };
-		try {
-			await invoke("set_youtube_webview_bounds", {
-				x: bounds.x,
-				y: bounds.y,
-				width: bounds.width,
-				height: bounds.height,
-				visible
-			});
-			error = "";
-		} catch (cause) {
-			error = String(cause);
+		requestedVisibility = visible;
+		if (updateRunning) {
+			updatePending = true;
+			return;
 		}
+
+		updateRunning = true;
+		do {
+			updatePending = false;
+			const nextVisible = requestedVisibility;
+			if (!host && nextVisible) break;
+			const bounds = host?.getBoundingClientRect() ?? { x: 0, y: 0, width: 1, height: 1 };
+			try {
+				await invoke("set_youtube_webview_bounds", {
+					x: bounds.x,
+					y: bounds.y,
+					width: bounds.width,
+					height: bounds.height,
+					visible: nextVisible
+				});
+				error = "";
+			} catch (cause) {
+				error = String(cause);
+			}
+		} while (updatePending);
+		updateRunning = false;
 	}
 
 	function mountWebview(node: HTMLDivElement) {
