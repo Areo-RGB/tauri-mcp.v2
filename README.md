@@ -1,101 +1,43 @@
-# MCPHub Tauri Frontend
+# MCPHub WinForms
 
-The packaged Tauri interface is a dedicated Svelte app in `shell/`. Its sidebar
-contains persistent Windows (`http://localhost:3000`) and WSL
-(`http://localhost:3001`) dashboard tabs plus host-specific build, start,
-restart, and stop controls. The existing React application remains the MCPHub
-dashboard rendered inside each tab.
+Native Windows desktop control center for the Windows and WSL MCPHub dashboards. The application uses .NET 10 WinForms with two persistent WebView2 dashboards and a C# backend for process control, ADB/Scrcpy, YouTube chapter processing/upload, clipboard tools, and Chrome extension integration.
 
-Windows desktop frontend for MCPHub. Starting the executable automatically runs
-`node C:\Users\paul\projects\mcp_UI\mcphub\dist\index.js` on port `3000`, then starts the
-`mcp-hub-windows` ngrok tunnel. The login page is bypassed because this setup
-uses MCPHub's `skipAuth` mode.
+## Features
 
-The automatic launcher uses:
+- Windows MCPHub at `http://localhost:3000` and WSL MCPHub at `http://localhost:3001`.
+- Build, start, restart, and stop controls with ngrok lifecycle and live output.
+- ADB device selection, Scrcpy mirrors, screenshots, specs export, and APK installation.
+- yt-dlp/ffmpeg chapter clipping, mounted Drive relocation, playlists, and private YouTube uploads.
+- Live clipboard editor, format detection, Desktop saving, session history, and supported script execution.
+- Chapter Clipper Chrome extension connected through a C# native-messaging host.
 
-- MCPHub working directory: `C:\Users\paul\projects\mcp_UI\mcphub`
-- MCPHub entry point: `C:\Users\paul\projects\mcp_UI\mcphub\dist\index.js`
-- ngrok config: `C:\Users\paul\AppData\Local\ngrok\ngrok.yml`
-- ngrok command: `ngrok start mcp-hub-windows --config <config>`
+The Windows Hub starts with the application. Hub and ngrok processes started by MCPHub are stopped when the application exits.
 
-The Dashboard Hub Controls are split into independent Windows and WSL tabs.
-Windows uses port `3000` with `ngrok.yml`; WSL commands run through `wsl.exe`
-on port `3001` and use
-`C:\Users\paul\AppData\Local\ngrok\ngrok-wsl.yml` with the
-`mcp-hub-wsl` endpoint. Both tabs can launch these scripts from their selected
-MCPHub source folder:
+## Development
 
-The Tauri desktop shell also embeds the complete MCPHub dashboards in persistent
-host tabs: Windows at `http://localhost:3000` and WSL at
-`http://localhost:3001`. Switching tabs changes the visible dashboard webview,
-while the Processes button opens the build/start/stop controls.
-
-- `pnpm build`
-- `node C:\Users\paul\projects\mcp_UI\mcphub\dist\index.js` (`Start Hub`)
-- `pnpm backend:dev`
-- `pnpm backend:debug`
-- `pnpm dev`
-- `pnpm debug`
-
-Only this fixed allowlist can be invoked. The selected folder must contain a
-`package.json`. Long-running commands start without an extra console window and
-can be stopped or restarted from the dashboard. Starting or restarting the
-normal `start` script also starts ngrok. Their latest output is shown in the
-expandable Command output area.
-
-## Run in development
+Requirements: Windows x64, .NET 10 SDK, and Microsoft Edge WebView2 Runtime. External workflows additionally use their existing tools on `PATH` and the machine-specific paths preserved in `MCPHub.Core/AppConstants.cs`.
 
 ```powershell
-corepack enable
-pnpm install
-pnpm tauri:dev
+dotnet restore .\winforms\MCPHub.slnx
+dotnet test .\winforms\MCPHub.slnx
+dotnet run --project .\winforms\MCPHub.App\MCPHub.App.csproj
 ```
 
-## Build the portable Windows executable
+## Portable build
 
-Run `build-portable.bat` from any location. The script resolves its own project
-directory and writes:
+Run `build-portable.bat` or `build-portable.ps1`. The self-contained output is written to:
 
 ```text
-dist-portable\MCPHub-Frontend.exe
+dist-portable\MCPHub-WinForms
 ```
 
-Requirements:
+The folder contains `MCPHub.exe`, the C# native host, the unpacked Chrome extension, WebView2 support files, and the native-host installer.
 
-- Node.js 20 or newer with Corepack/pnpm
-- Official Rust stable MSVC toolchain
-- Microsoft C++ Build Tools with the Desktop development with C++ workload
-- Microsoft Edge WebView2 Runtime (included with current Windows 10/11)
+## Chrome extension
 
-The Tauri bundle step is intentionally disabled. The release binary itself is
-the portable single-file app; there is no installer and no embedded backend.
+1. Open `chrome://extensions`, enable developer mode, and load `chrome-extension` from the portable folder.
+2. Copy the displayed extension ID.
+3. Run `install-chrome-native-host.ps1 -ExtensionId <id>` from the portable folder.
+4. Start `MCPHub.exe`, then use the extension on YouTube.
 
-## Backend URL
-
-The frontend is fixed to `http://localhost:3000`, including its desktop content
-security policy.
-
-The backend must allow requests from the Tauri webview origin and support
-credentials if Better Auth is enabled. Token-based MCPHub login works through
-the normal `/api/auth/login` endpoint.
-
-## YouTube clip uploads
-
-After a video is downloaded and its clips are created, the complete video
-folder is moved into the `vgl2014er` Google Drive mounted at
-`G:\My Drive\video-drives`. Set `YOUTUBE_DRIVE_DIR` before launching MCPHub to
-use a different mounted Drive or rclone mount. Existing folders are preserved;
-repeat downloads receive a numeric suffix.
-
-The bundled Chapter Clipper Chrome extension adds a playlist selector beside
-YouTube's Transcript tab and an Upload button to every chapter row. Keep MCPHub
-running, select a playlist, and click a chapter's button to download the source,
-cut that chapter, move the files to Google Drive, upload the clip privately, and
-add it to the selected playlist. The panel-level button runs the same workflow
-for every chapter.
-
-Enable the YouTube Data API v3 in a Google Cloud project and create a desktop
-OAuth client. Put the client values in the project `.env` as
-`GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. In YouTube Clipper, choose
-**Connect with Google** to authorize the account, load or create a playlist,
-and upload the generated clips directly into it.
+The native host forwards `ping`, chapter-fetch, playlist, processing, and upload requests to the running desktop app through the local `MCPHub.ChapterClipper.v1` named pipe.

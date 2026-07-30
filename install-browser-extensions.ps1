@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $projectDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$extensionsDir = Join-Path $projectDir "src-tauri\extensions"
+$extensionsDir = Join-Path $projectDir "winforms\chrome-extension"
 
 function Install-ChromiumExtension {
     param(

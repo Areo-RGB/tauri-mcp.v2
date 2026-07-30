@@ -1,32 +1,29 @@
 #Requires -Version 5.1
+param([switch]$SkipTests)
+$ErrorActionPreference = 'Stop'
+$projectRoot = $PSScriptRoot
+$solution = Join-Path $projectRoot 'winforms\MCPHub.slnx'
+$output = Join-Path $projectRoot 'dist-portable\MCPHub-WinForms'
+$hostTemp = Join-Path $env:TEMP 'mcphub-native-host-publish'
 
-$ProjectDir = $PSScriptRoot
-Set-Location -LiteralPath $ProjectDir
+if (Test-Path -LiteralPath $output) { Remove-Item -LiteralPath $output -Recurse -Force }
+if (Test-Path -LiteralPath $hostTemp) { Remove-Item -LiteralPath $hostTemp -Recurse -Force }
+New-Item -ItemType Directory -Force -Path $output, $hostTemp | Out-Null
 
-# Check prerequisites
-if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) {
-    Write-Host "ERROR: pnpm was not found on PATH." -ForegroundColor Red
-    Write-Host "Install Node.js, then run: corepack enable"
-    exit 1
+dotnet restore $solution
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if (-not $SkipTests) {
+  dotnet test $solution --no-restore --configuration Release
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
-if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
-    Write-Host "ERROR: Rust/Cargo was not found on PATH." -ForegroundColor Red
-    Write-Host "Install the official Rust MSVC toolchain from https://rustup.rs/"
-    exit 1
-}
+dotnet publish (Join-Path $projectRoot 'winforms\MCPHub.App\MCPHub.App.csproj') --configuration Release --runtime win-x64 --self-contained true --output $output -p:PublishSingleFile=true -p:PublishTrimmed=false -p:DebugType=None
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+dotnet publish (Join-Path $projectRoot 'winforms\MCPHub.NativeHost\MCPHub.NativeHost.csproj') --configuration Release --runtime win-x64 --self-contained true --output $hostTemp -p:PublishSingleFile=true -p:PublishTrimmed=false -p:DebugType=None
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-Write-Host "Building the portable Windows executable..." -ForegroundColor Cyan
-pnpm tauri:build
-if ($LASTEXITCODE -ne 0) { exit 1 }
-
-$Desktop = [Environment]::GetFolderPath("Desktop")
-$Source = "$ProjectDir\src-tauri\target\release\MCPHub-Frontend.exe"
-$Dest = "$Desktop\MCPHub-Frontend.exe"
-
-Copy-Item -LiteralPath $Source -Destination $Dest -Force
-if (-not $?) { exit 1 }
-
-Write-Host "`nPortable executable on your Desktop:" -ForegroundColor Green
-Write-Host $Dest -ForegroundColor Green
-exit 0
+Copy-Item -LiteralPath (Join-Path $hostTemp 'chapter-clipper-native-host.exe') -Destination $output -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot 'winforms\chrome-extension\chapter-clipper') -Destination (Join-Path $output 'chrome-extension') -Recurse -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot 'install-chrome-native-host.ps1') -Destination $output -Force
+Remove-Item -LiteralPath $hostTemp -Recurse -Force
+Write-Host "Portable WinForms build: $output" -ForegroundColor Green

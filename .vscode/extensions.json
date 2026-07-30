@@ -1,6 +1,6 @@
 {
-	"recommendations": [
-		"bradlc.vscode-tailwindcss",
-		"rust-lang.rust-analyzer"
-	]
+  "recommendations": [
+    "ms-dotnettools.csharp",
+    "ms-dotnettools.csdevkit"
+  ]
 }

@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="MCPHub.App/MCPHub.App.csproj" />
+  <Project Path="MCPHub.Core/MCPHub.Core.csproj" />
+  <Project Path="MCPHub.NativeHost/MCPHub.NativeHost.csproj" />
+  <Project Path="MCPHub.Tests/MCPHub.Tests.csproj" />
+</Solution>
