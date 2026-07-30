@@ -1,18 +1,22 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use rand::{distr::Alphanumeric, Rng};
 use regex::Regex;
+use reqwest::blocking::{Client, Response};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::VecDeque,
     fs::{self, File},
-    io::{Read, Seek, SeekFrom},
-    net::TcpListener,
+    io::{Read, Seek, SeekFrom, Write},
+    net::{TcpListener, TcpStream},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{Arc, Mutex},
-    time::Duration,
+    thread,
+    time::{Duration, Instant},
 };
 use tauri::Manager;
+use url::{form_urlencoded, Url};
 use wait_timeout::ChildExt;
 
 #[cfg(windows)]
@@ -27,6 +31,11 @@ const WSL_NGROK_CONFIG: &str = r"C:\Users\paul\AppData\Local\ngrok\ngrok-wsl.yml
 const YOUTUBE_YT_DLP: &str = r"C:\Users\paul\projects\YouTube\backend\yt-dlp.exe";
 const YOUTUBE_COOKIES: &str = r"C:\Users\paul\projects\YouTube\backend\cookies.txt";
 const CHROME_EXECUTABLE: &str = r"C:\Users\paul\AppData\Local\Google\Chrome\Application\chrome.exe";
+const YOUTUBE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
+const YOUTUBE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
+const YOUTUBE_API_URL: &str = "https://www.googleapis.com/youtube/v3";
+const YOUTUBE_SCOPES: &str =
+    "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube";
 const CHAPTER_CLIPPER_SOCKET: &str = "127.0.0.1:32145";
 const CLIPBOARD_SAMPLE_LIMIT: usize = 200_000;
 const CLIPBOARD_RUN_TIMEOUT_SECONDS: u64 = 60;
@@ -569,7 +578,7 @@ fn adb_result(command: String, output: std::process::Output) -> AdbCommandResult
 fn run_adb(args: &[String]) -> Result<AdbCommandResult, String> {
     let executable = adb_executable()?;
     let command = format!("adb {}", args.join(" "));
-    let mut process = scrcpy_command(&executable);
+    let mut process = Command::new(executable);
     process
         .args(args)
         .stdin(Stdio::null())
@@ -631,7 +640,7 @@ fn get_adb_devices() -> Result<Vec<AdbDevice>, String> {
 #[tauri::command]
 fn get_scrcpy_version() -> Result<AdbCommandResult, String> {
     let executable = scrcpy_executable()?;
-    let mut process = Command::new(executable);
+    let mut process = scrcpy_command(&executable);
     process
         .arg("--version")
         .stdin(Stdio::null())
@@ -646,7 +655,10 @@ fn get_scrcpy_version() -> Result<AdbCommandResult, String> {
 }
 
 #[tauri::command]
-fn start_scrcpy_mirror(serials: Vec<String>) -> Result<AdbCommandResult, String> {
+fn start_scrcpy_mirror(
+    serials: Vec<String>,
+    turn_screen_off: bool,
+) -> Result<AdbCommandResult, String> {
     let executable = scrcpy_executable()?;
     if serials.is_empty() {
         return Err("Select at least one device.".to_string());
@@ -656,10 +668,20 @@ fn start_scrcpy_mirror(serials: Vec<String>) -> Result<AdbCommandResult, String>
     for serial in &serials {
         let mut process = scrcpy_command(&executable);
         process.args(["-s", serial]);
+        if turn_screen_off {
+            process.arg("--turn-screen-off");
+        }
         #[cfg(windows)]
         process.creation_flags(CREATE_NO_WINDOW);
         match process.spawn() {
-            Ok(_) => lines.push(format!("Started Scrcpy for {serial}.")),
+            Ok(_) => {
+                let display = if turn_screen_off {
+                    format!("Started Scrcpy for {serial} with screen off.")
+                } else {
+                    format!("Started Scrcpy for {serial}.")
+                };
+                lines.push(display);
+            }
             Err(error) => {
                 ok = false;
                 lines.push(format!("Could not start Scrcpy for {serial}: {error}"));
@@ -859,6 +881,594 @@ struct YouTubeProcessResult {
     video_path: String,
     output_dir: String,
     clips: Vec<YouTubeClipResult>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct YouTubePlaylist {
+    id: String,
+    title: String,
+    description: String,
+    privacy_status: String,
+    item_count: u64,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct YouTubeAuthStatus {
+    connected: bool,
+    channel_title: Option<String>,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct YouTubeUploadClip {
+    title: String,
+    file_path: String,
+    description: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct YouTubeUploadedClip {
+    title: String,
+    video_id: String,
+    url: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct YouTubeUploadResult {
+    playlist_id: String,
+    clips: Vec<YouTubeUploadedClip>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct StoredYouTubeToken {
+    access_token: String,
+    refresh_token: String,
+    token_type: String,
+    expires_at: i64,
+}
+
+#[derive(Deserialize)]
+struct GoogleTokenResponse {
+    access_token: String,
+    expires_in: i64,
+    refresh_token: Option<String>,
+    token_type: Option<String>,
+}
+
+fn youtube_oauth_config() -> Result<(String, String), String> {
+    let client_id = std::env::var("GOOGLE_CLIENT_ID")
+        .map_err(|_| "GOOGLE_CLIENT_ID is not configured. Add it to .env.".to_string())?;
+    let client_secret = std::env::var("GOOGLE_CLIENT_SECRET")
+        .map_err(|_| "GOOGLE_CLIENT_SECRET is not configured. Add it to .env.".to_string())?;
+    if client_id.trim().is_empty() || client_secret.trim().is_empty() {
+        return Err("Google OAuth credentials are empty. Add them to .env.".to_string());
+    }
+    Ok((client_id, client_secret))
+}
+
+fn youtube_token_path() -> PathBuf {
+    dirs::config_dir()
+        .or_else(dirs::data_local_dir)
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(std::env::temp_dir)
+        .join("MCPHub")
+        .join("youtube-token.json")
+}
+
+fn load_youtube_token() -> Result<StoredYouTubeToken, String> {
+    let path = youtube_token_path();
+    let raw = fs::read_to_string(&path)
+        .map_err(|_| "YouTube is not connected. Connect a Google account first.".to_string())?;
+    serde_json::from_str(&raw).map_err(|error| format!("Saved YouTube token is invalid: {error}"))
+}
+
+fn save_youtube_token(token: &StoredYouTubeToken) -> Result<(), String> {
+    let path = youtube_token_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Could not create YouTube token folder: {error}"))?;
+    }
+    let raw = serde_json::to_string_pretty(token)
+        .map_err(|error| format!("Could not encode YouTube token: {error}"))?;
+    fs::write(path, raw).map_err(|error| format!("Could not save YouTube token: {error}"))
+}
+
+fn response_text(response: Response, label: &str) -> Result<String, String> {
+    let status = response.status();
+    let body = response
+        .text()
+        .map_err(|error| format!("Could not read {label} response: {error}"))?;
+    if !status.is_success() {
+        let detail = serde_json::from_str::<serde_json::Value>(&body)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("error")
+                    .and_then(|error| error.get("message"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+            })
+            .unwrap_or_else(|| body.trim().to_string());
+        return Err(format!("{label} failed ({}): {detail}", status.as_u16()));
+    }
+    Ok(body)
+}
+
+fn refresh_youtube_token(token: &StoredYouTubeToken) -> Result<StoredYouTubeToken, String> {
+    let (client_id, client_secret) = youtube_oauth_config()?;
+    let response = Client::new()
+        .post(YOUTUBE_TOKEN_URL)
+        .form(&[
+            ("client_id", client_id.as_str()),
+            ("client_secret", client_secret.as_str()),
+            ("refresh_token", token.refresh_token.as_str()),
+            ("grant_type", "refresh_token"),
+        ])
+        .send()
+        .map_err(|error| format!("Could not refresh the YouTube token: {error}"))?;
+    let body = response_text(response, "YouTube token refresh")?;
+    let refreshed: GoogleTokenResponse = serde_json::from_str(&body)
+        .map_err(|error| format!("YouTube returned an invalid refreshed token: {error}"))?;
+    let next = StoredYouTubeToken {
+        access_token: refreshed.access_token,
+        refresh_token: refreshed
+            .refresh_token
+            .unwrap_or_else(|| token.refresh_token.clone()),
+        token_type: refreshed
+            .token_type
+            .unwrap_or_else(|| token.token_type.clone()),
+        expires_at: chrono::Utc::now().timestamp() + refreshed.expires_in,
+    };
+    save_youtube_token(&next)?;
+    Ok(next)
+}
+
+fn youtube_access_token() -> Result<String, String> {
+    let token = load_youtube_token()?;
+    if token.expires_at > chrono::Utc::now().timestamp() + 60 {
+        return Ok(token.access_token);
+    }
+    Ok(refresh_youtube_token(&token)?.access_token)
+}
+
+fn open_browser_url(url: &str) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        if Path::new(CHROME_EXECUTABLE).is_file() {
+            Command::new(CHROME_EXECUTABLE)
+                .arg(url)
+                .spawn()
+                .map_err(|error| format!("Could not launch Chrome: {error}"))?;
+            return Ok(());
+        }
+    }
+    #[cfg(not(windows))]
+    let opener = "xdg-open";
+    #[cfg(windows)]
+    let opener = "cmd";
+    #[cfg(windows)]
+    let mut command = Command::new(opener);
+    #[cfg(not(windows))]
+    let mut command = Command::new(opener);
+    #[cfg(windows)]
+    command.args(["/C", "start", "", url]);
+    #[cfg(not(windows))]
+    command.arg(url);
+    command
+        .spawn()
+        .map_err(|error| format!("Could not open the browser: {error}"))?;
+    Ok(())
+}
+
+fn callback_response(stream: &mut TcpStream, body: &str) {
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    let _ = stream.write_all(response.as_bytes());
+}
+
+fn wait_for_youtube_oauth_code(
+    listener: &TcpListener,
+    expected_state: &str,
+) -> Result<String, String> {
+    let deadline = Instant::now() + Duration::from_secs(300);
+    while Instant::now() < deadline {
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                let mut buffer = [0_u8; 8192];
+                let bytes = stream.read(&mut buffer).map_err(|error| {
+                    format!("Could not read the Google OAuth callback: {error}")
+                })?;
+                let request = String::from_utf8_lossy(&buffer[..bytes]);
+                let Some(target) = request
+                    .lines()
+                    .next()
+                    .and_then(|line| line.split_whitespace().nth(1))
+                else {
+                    callback_response(
+                        &mut stream,
+                        "OAuth callback was not understood. You can close this tab.",
+                    );
+                    continue;
+                };
+                let callback_url = Url::parse(&format!("http://localhost{target}"))
+                    .map_err(|error| format!("Invalid Google OAuth callback: {error}"))?;
+                let params: std::collections::HashMap<_, _> =
+                    callback_url.query_pairs().into_owned().collect();
+                if params.get("state").map(String::as_str) != Some(expected_state) {
+                    callback_response(
+                        &mut stream,
+                        "OAuth state did not match. You can close this tab.",
+                    );
+                    continue;
+                }
+                if let Some(error) = params.get("error") {
+                    callback_response(
+                        &mut stream,
+                        "YouTube connection was cancelled. You can close this tab.",
+                    );
+                    return Err(format!("Google OAuth was not completed: {error}"));
+                }
+                let code = params.get("code").cloned().ok_or_else(|| {
+                    "Google OAuth callback did not include an authorization code.".to_string()
+                })?;
+                callback_response(
+                    &mut stream,
+                    "YouTube is connected. You can close this tab and return to MCPHub.",
+                );
+                return Ok(code);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(100));
+            }
+            Err(error) => {
+                return Err(format!(
+                    "Could not receive the Google OAuth callback: {error}"
+                ))
+            }
+        }
+    }
+    Err("Timed out waiting for Google OAuth. Try connecting again.".to_string())
+}
+
+fn youtube_authenticate_inner() -> Result<YouTubeAuthStatus, String> {
+    let (client_id, client_secret) = youtube_oauth_config()?;
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .map_err(|error| format!("Could not start the local OAuth callback: {error}"))?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|error| format!("Could not configure the local OAuth callback: {error}"))?;
+    let redirect_uri = format!(
+        "http://127.0.0.1:{}/",
+        listener
+            .local_addr()
+            .map_err(|error| error.to_string())?
+            .port()
+    );
+    let state: String = rand::rng()
+        .sample_iter(&Alphanumeric)
+        .take(48)
+        .map(char::from)
+        .collect();
+    let mut auth_url = form_urlencoded::Serializer::new(String::from(YOUTUBE_AUTH_URL));
+    auth_url.append_pair("client_id", &client_id);
+    auth_url.append_pair("redirect_uri", &redirect_uri);
+    auth_url.append_pair("response_type", "code");
+    auth_url.append_pair("scope", YOUTUBE_SCOPES);
+    auth_url.append_pair("access_type", "offline");
+    auth_url.append_pair("prompt", "consent");
+    auth_url.append_pair("state", &state);
+    open_browser_url(&auth_url.finish())?;
+    let code = wait_for_youtube_oauth_code(&listener, &state)?;
+    let response = Client::new()
+        .post(YOUTUBE_TOKEN_URL)
+        .form(&[
+            ("code", code.as_str()),
+            ("client_id", client_id.as_str()),
+            ("client_secret", client_secret.as_str()),
+            ("redirect_uri", redirect_uri.as_str()),
+            ("grant_type", "authorization_code"),
+        ])
+        .send()
+        .map_err(|error| format!("Could not exchange the Google OAuth code: {error}"))?;
+    let body = response_text(response, "Google OAuth token exchange")?;
+    let token: GoogleTokenResponse = serde_json::from_str(&body)
+        .map_err(|error| format!("Google returned an invalid OAuth token: {error}"))?;
+    let refresh_token = token.refresh_token.ok_or_else(|| {
+        "Google did not return a refresh token. Try connecting again.".to_string()
+    })?;
+    save_youtube_token(&StoredYouTubeToken {
+        access_token: token.access_token,
+        refresh_token,
+        token_type: token.token_type.unwrap_or_else(|| "Bearer".to_string()),
+        expires_at: chrono::Utc::now().timestamp() + token.expires_in,
+    })?;
+    youtube_auth_status_inner()
+}
+
+fn youtube_auth_status_inner() -> Result<YouTubeAuthStatus, String> {
+    let token = match youtube_access_token() {
+        Ok(token) => token,
+        Err(error) if error.starts_with("YouTube is not connected") => {
+            return Ok(YouTubeAuthStatus {
+                connected: false,
+                channel_title: None,
+            });
+        }
+        Err(error) => return Err(error),
+    };
+    let response = Client::new()
+        .get(format!("{YOUTUBE_API_URL}/channels"))
+        .bearer_auth(token)
+        .query(&[("part", "snippet"), ("mine", "true")])
+        .send()
+        .map_err(|error| format!("Could not load the YouTube channel: {error}"))?;
+    let body = response_text(response, "YouTube channel lookup")?;
+    let value: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|error| format!("YouTube returned invalid channel data: {error}"))?;
+    let channel_title = value
+        .get("items")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|items| items.first())
+        .and_then(|item| item.get("snippet"))
+        .and_then(|snippet| snippet.get("title"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    Ok(YouTubeAuthStatus {
+        connected: true,
+        channel_title,
+    })
+}
+
+#[tauri::command]
+async fn youtube_authenticate() -> Result<YouTubeAuthStatus, String> {
+    tauri::async_runtime::spawn_blocking(youtube_authenticate_inner)
+        .await
+        .map_err(|error| format!("YouTube OAuth task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn get_youtube_auth_status() -> Result<YouTubeAuthStatus, String> {
+    tauri::async_runtime::spawn_blocking(youtube_auth_status_inner)
+        .await
+        .map_err(|error| format!("YouTube account lookup failed: {error}"))?
+}
+
+#[tauri::command]
+fn disconnect_youtube() -> Result<(), String> {
+    let path = youtube_token_path();
+    if path.exists() {
+        fs::remove_file(path).map_err(|error| format!("Could not disconnect YouTube: {error}"))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_youtube_playlists() -> Result<Vec<YouTubePlaylist>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let token = youtube_access_token()?;
+        let client = Client::new();
+        let mut playlists = Vec::new();
+        let mut page_token = None;
+        loop {
+            let mut query = vec![
+                ("part", "snippet,contentDetails,status"),
+                ("mine", "true"),
+                ("maxResults", "50"),
+            ];
+            if let Some(token) = page_token.as_deref() {
+                query.push(("pageToken", token));
+            }
+            let response = client
+                .get(format!("{YOUTUBE_API_URL}/playlists"))
+                .bearer_auth(&token)
+                .query(&query)
+                .send()
+                .map_err(|error| format!("Could not load YouTube playlists: {error}"))?;
+            let body = response_text(response, "YouTube playlist lookup")?;
+            let value: serde_json::Value = serde_json::from_str(&body)
+                .map_err(|error| format!("YouTube returned invalid playlist data: {error}"))?;
+            if let Some(items) = value.get("items").and_then(serde_json::Value::as_array) {
+                playlists.extend(items.iter().filter_map(|item| {
+                    Some(YouTubePlaylist {
+                        id: item.get("id")?.as_str()?.to_string(),
+                        title: item.get("snippet")?.get("title")?.as_str()?.to_string(),
+                        description: item
+                            .get("snippet")?
+                            .get("description")?
+                            .as_str()?
+                            .to_string(),
+                        privacy_status: item
+                            .get("status")?
+                            .get("privacyStatus")?
+                            .as_str()?
+                            .to_string(),
+                        item_count: item
+                            .get("contentDetails")?
+                            .get("itemCount")?
+                            .as_u64()
+                            .unwrap_or(0),
+                    })
+                }));
+            }
+            page_token = value
+                .get("nextPageToken")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string);
+            if page_token.is_none() {
+                break;
+            }
+        }
+        Ok(playlists)
+    })
+    .await
+    .map_err(|error| format!("YouTube playlist task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn create_youtube_playlist(
+    title: String,
+    description: String,
+    privacy_status: String,
+) -> Result<YouTubePlaylist, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let token = youtube_access_token()?;
+        let privacy_status = match privacy_status.as_str() {
+            "private" | "unlisted" | "public" => privacy_status,
+            _ => "private".to_string(),
+        };
+        let response = Client::new()
+            .post(format!("{YOUTUBE_API_URL}/playlists"))
+            .bearer_auth(token)
+            .query(&[("part", "snippet,status")])
+            .json(&serde_json::json!({
+                "snippet": { "title": title.trim(), "description": description.trim() },
+                "status": { "privacyStatus": privacy_status }
+            }))
+            .send()
+            .map_err(|error| format!("Could not create the YouTube playlist: {error}"))?;
+        let body = response_text(response, "YouTube playlist creation")?;
+        let item: serde_json::Value = serde_json::from_str(&body)
+            .map_err(|error| format!("YouTube returned invalid playlist data: {error}"))?;
+        Ok(YouTubePlaylist {
+            id: item
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            title: item
+                .get("snippet")
+                .and_then(|value| value.get("title"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            description: item
+                .get("snippet")
+                .and_then(|value| value.get("description"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            privacy_status: item
+                .get("status")
+                .and_then(|value| value.get("privacyStatus"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("private")
+                .to_string(),
+            item_count: 0,
+        })
+    })
+    .await
+    .map_err(|error| format!("YouTube playlist creation task failed: {error}"))?
+}
+
+fn upload_youtube_clip(
+    client: &Client,
+    token: &str,
+    clip: &YouTubeUploadClip,
+) -> Result<String, String> {
+    let path = PathBuf::from(&clip.file_path);
+    let file =
+        File::open(&path).map_err(|error| format!("Could not open {}: {error}", clip.title))?;
+    let length = file
+        .metadata()
+        .map_err(|error| format!("Could not inspect {}: {error}", clip.title))?
+        .len();
+    let metadata = serde_json::json!({
+        "snippet": {
+            "title": clip.title,
+            "description": clip.description.clone().unwrap_or_default()
+        },
+        "status": { "privacyStatus": "private" }
+    });
+    let response = client
+        .post(format!("{YOUTUBE_API_URL}/videos"))
+        .bearer_auth(token)
+        .query(&[("uploadType", "resumable"), ("part", "snippet,status")])
+        .header("Content-Type", "application/json; charset=UTF-8")
+        .header("X-Upload-Content-Type", "video/mp4")
+        .header("X-Upload-Content-Length", length.to_string())
+        .body(metadata.to_string())
+        .send()
+        .map_err(|error| {
+            format!(
+                "Could not start the YouTube upload for {}: {error}",
+                clip.title
+            )
+        })?;
+    let location = response
+        .headers()
+        .get(reqwest::header::LOCATION)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string)
+        .ok_or_else(|| "YouTube did not return an upload URL.".to_string())?;
+    let response = client
+        .put(location)
+        .bearer_auth(token)
+        .header("Content-Type", "video/mp4")
+        .body(file)
+        .send()
+        .map_err(|error| format!("Could not upload {} to YouTube: {error}", clip.title))?;
+    let body = response_text(response, &format!("YouTube upload for {}", clip.title))?;
+    let value: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|error| format!("YouTube returned invalid upload data: {error}"))?;
+    value
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| format!("YouTube did not return a video ID for {}.", clip.title))
+}
+
+#[tauri::command]
+async fn upload_youtube_clips(
+    playlist_id: String,
+    clips: Vec<YouTubeUploadClip>,
+) -> Result<YouTubeUploadResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if playlist_id.trim().is_empty() {
+            return Err("Select a YouTube playlist first.".to_string());
+        }
+        if clips.is_empty() {
+            return Err("Create clips before uploading them to YouTube.".to_string());
+        }
+        let token = youtube_access_token()?;
+        let client = Client::new();
+        let mut uploaded = Vec::new();
+        for clip in &clips {
+            let video_id = upload_youtube_clip(&client, &token, clip)?;
+            let response = client
+                .post(format!("{YOUTUBE_API_URL}/playlistItems"))
+                .bearer_auth(&token)
+                .query(&[("part", "snippet")])
+                .json(&serde_json::json!({
+                    "snippet": {
+                        "playlistId": playlist_id,
+                        "resourceId": { "kind": "youtube#video", "videoId": video_id }
+                    }
+                }))
+                .send()
+                .map_err(|error| {
+                    format!("Could not add {} to the playlist: {error}", clip.title)
+                })?;
+            response_text(response, &format!("Adding {} to the playlist", clip.title))?;
+            uploaded.push(YouTubeUploadedClip {
+                title: clip.title.clone(),
+                url: format!("https://www.youtube.com/watch?v={video_id}"),
+                video_id,
+            });
+        }
+        Ok(YouTubeUploadResult {
+            playlist_id,
+            clips: uploaded,
+        })
+    })
+    .await
+    .map_err(|error| format!("YouTube upload task failed: {error}"))?
 }
 
 fn youtube_output_dir() -> PathBuf {
@@ -1151,14 +1761,7 @@ async fn process_youtube_video(
 
 #[tauri::command]
 fn open_youtube_chrome() -> Result<(), String> {
-    if !Path::new(CHROME_EXECUTABLE).is_file() {
-        return Err(format!("Chrome was not found at {CHROME_EXECUTABLE}"));
-    }
-    Command::new(CHROME_EXECUTABLE)
-        .arg("https://www.youtube.com/")
-        .spawn()
-        .map_err(|error| format!("Could not launch Chrome: {error}"))?;
-    Ok(())
+    open_browser_url("https://www.youtube.com/")
 }
 
 #[derive(Deserialize)]
@@ -1725,6 +2328,7 @@ fn autostart_windows_hub(state: &HubProcessState) {
 }
 
 fn main() {
+    dotenvy::dotenv().ok();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(HubProcessState::default())
@@ -1766,6 +2370,12 @@ fn main() {
             get_youtube_tools_status,
             get_youtube_video_info,
             process_youtube_video,
+            youtube_authenticate,
+            get_youtube_auth_status,
+            disconnect_youtube,
+            get_youtube_playlists,
+            create_youtube_playlist,
+            upload_youtube_clips,
             open_youtube_chrome,
             get_chapter_clipper_logs,
             get_latest_extension_video,

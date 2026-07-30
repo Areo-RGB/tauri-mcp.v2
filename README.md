@@ -78,3 +78,11 @@ security policy.
 The backend must allow requests from the Tauri webview origin and support
 credentials if Better Auth is enabled. Token-based MCPHub login works through
 the normal `/api/auth/login` endpoint.
+
+## YouTube clip uploads
+
+Enable the YouTube Data API v3 in a Google Cloud project and create a desktop
+OAuth client. Put the client values in the project `.env` as
+`GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. In YouTube Clipper, choose
+**Connect with Google** to authorize the account, load or create a playlist,
+and upload the generated clips directly into it.

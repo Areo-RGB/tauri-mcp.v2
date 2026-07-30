@@ -28,6 +28,7 @@
 	let busy = $state("");
 	let error = $state("");
 	let scrcpyReady = $state<boolean | null>(null);
+	let turnScreenOff = $state(false);
 	let allSelected = $derived(devices.length > 0 && selectedSerials.length === devices.length);
 
 	onMount(() => { void refreshDevices(); });
@@ -72,7 +73,7 @@
 	}
 
 	async function mirrorSelected() {
-		await run("Starting mirror", () => invoke<CommandResult>("start_scrcpy_mirror", { serials: selectedSerials }), (value) => value.lines);
+		await run("Starting mirror", () => invoke<CommandResult>("start_scrcpy_mirror", { serials: selectedSerials, turnScreenOff }), (value) => value.lines);
 	}
 
 	async function screenshotSelected() {
@@ -116,11 +117,17 @@
 
 		<Card.Root>
 			<Card.Header><Card.Title>Actions</Card.Title><Card.Description>Run tools against the selected devices.</Card.Description></Card.Header>
-			<Card.Content class="flex flex-wrap gap-2">
+			<Card.Content class="flex flex-col gap-3">
+				<label class="hover:bg-muted/40 flex items-start gap-3 rounded-md border p-3">
+					<Checkbox checked={turnScreenOff} disabled={!!busy} onclick={() => (turnScreenOff = !turnScreenOff)} />
+					<span class="grid gap-1"><span class="text-sm font-medium">Start with screen off</span><span class="text-muted-foreground text-xs">Keep the Scrcpy mirror active while the device display is off. Scrcpy chooses the video settings automatically.</span></span>
+				</label>
+				<div class="flex flex-wrap gap-2">
 				<Button variant="outline" disabled={!!busy} onclick={checkScrcpy}>{#if busy === "Checking Scrcpy backend"}<LoaderCircleIcon data-icon="inline-start" class="animate-spin" />{:else}<TerminalIcon data-icon="inline-start" />{/if}Check Scrcpy {#if scrcpyReady !== null}<Badge variant={scrcpyReady ? "default" : "destructive"}>{scrcpyReady ? "Ready" : "Missing"}</Badge>{/if}</Button>
 				<Button disabled={!!busy || !selectedSerials.length} onclick={mirrorSelected}><PlayIcon data-icon="inline-start" />Mirror selected</Button>
 				<Button variant="outline" disabled={!!busy || !selectedSerials.length} onclick={screenshotSelected}><CameraIcon data-icon="inline-start" />Screenshot selected</Button>
 				<Button variant="outline" disabled={!!busy || !selectedSerials.length} onclick={exportSpecs}><FileCogIcon data-icon="inline-start" />Export specs</Button>
+				</div>
 			</Card.Content>
 		</Card.Root>
 
