@@ -1,6 +1,5 @@
 <script lang="ts">
-	import { open } from "@tauri-apps/plugin-dialog";
-	import { invoke } from "@tauri-apps/api/core";
+	import { invoke, openFile } from "$lib/desktop";
 	import { Badge } from "$lib/components/ui/badge";
 	import { Button } from "$lib/components/ui/button";
 	import * as Card from "$lib/components/ui/card";
@@ -85,8 +84,8 @@
 	}
 
 	async function pickApk() {
-		const selected = await open({ multiple: false, directory: false, filters: [{ name: "Android packages", extensions: ["apk"] }] });
-		if (typeof selected === "string") apkPath = selected;
+		const selected = await openFile({ filters: [{ name: "Android packages", extensions: ["apk"] }] });
+		if (selected) apkPath = selected;
 	}
 
 	async function installApk() {
