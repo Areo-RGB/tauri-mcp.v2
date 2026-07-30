@@ -3,13 +3,14 @@
 	import BoxIcon from "@lucide/svelte/icons/box";
 	import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
 	import ClipboardIcon from "@lucide/svelte/icons/clipboard";
+	import AndroidIcon from "lucide-svelte/icons/smartphone";
 	import MonitorIcon from "@lucide/svelte/icons/monitor";
 	import TerminalIcon from "@lucide/svelte/icons/terminal";
 	import YoutubeIcon from "lucide-svelte/icons/youtube";
 	import type { ComponentProps } from "svelte";
 
 	type HubTarget = "windows" | "wsl";
-	type AppTab = HubTarget | "clipboard" | "youtube";
+	type AppTab = HubTarget | "clipboard" | "youtube" | "adb";
 	type HubStatus = {
 		running: boolean;
 		pid: number | null;
@@ -74,6 +75,14 @@
 						</Sidebar.MenuItem>
 					{/each}
 					<Sidebar.MenuItem>
+						<Sidebar.MenuButton class="h-9 ps-4" isActive={activeTab === "adb"} tooltipContent="ADB Android Tools" onclick={() => onSelect("adb")}>
+							<ChevronRightIcon class="text-muted-foreground" />
+							<AndroidIcon />
+							<span>ADB Android Tools</span>
+						</Sidebar.MenuButton>
+						<Sidebar.MenuBadge>Rust</Sidebar.MenuBadge>
+					</Sidebar.MenuItem>
+					<Sidebar.MenuItem>
 						<Sidebar.MenuButton class="h-9 ps-4" isActive={activeTab === "youtube"} tooltipContent="YouTube Clipper · Native" onclick={() => onSelect("youtube")}>
 							<ChevronRightIcon class="text-muted-foreground" />
 							<YoutubeIcon />
@@ -94,7 +103,7 @@
 	</Sidebar.Content>
 
 	<Sidebar.Footer class="group-data-[collapsible=icon]:hidden">
-		<p class="text-muted-foreground truncate px-2 font-mono text-xs">{activeTab === "windows" ? "http://localhost:3000" : activeTab === "wsl" ? "http://localhost:3001" : activeTab === "youtube" ? "Native Rust media tools" : "Native clipboard tools"}</p>
+		<p class="text-muted-foreground truncate px-2 font-mono text-xs">{activeTab === "windows" ? "http://localhost:3000" : activeTab === "wsl" ? "http://localhost:3001" : activeTab === "youtube" ? "Native Rust media tools" : activeTab === "adb" ? "Native Rust ADB bridge" : "Native clipboard tools"}</p>
 	</Sidebar.Footer>
 	<Sidebar.Rail />
 </Sidebar.Root>

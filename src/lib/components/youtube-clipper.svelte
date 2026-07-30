@@ -32,36 +32,52 @@
 	let busy = $state<"fetch" | "process" | null>(null);
 	let status = $state("Ready");
 	let error = $state("");
+	let loadedExtensionVideoId = "";
 	let activeChapters = $derived(mode === "chapters" ? (video?.chapters ?? []) : customChapters);
 	let selectedChapters = $derived(activeChapters.filter((chapter) => chapter.selected !== false));
 	let toolsReady = $derived(!!tools?.ytDlp && !!tools?.ffmpeg);
 
-	onMount(() => { void loadTools(); });
+	onMount(() => {
+		void loadTools();
+		void loadExtensionVideo();
+		const interval = window.setInterval(() => void loadExtensionVideo(), 1_000);
+		return () => window.clearInterval(interval);
+	});
 
 	async function loadTools() {
 		try { tools = await invoke<ToolsStatus>("get_youtube_tools_status"); }
 		catch (cause) { error = String(cause); }
 	}
 
+	async function loadExtensionVideo() {
+		try {
+			const latest = await invoke<VideoInfo | null>("get_latest_extension_video");
+			if (!latest || latest.id === loadedExtensionVideoId) return;
+			loadedExtensionVideoId = latest.id;
+			latest.chapters = latest.chapters.map((chapter) => ({ ...chapter, selected: true }));
+			video = latest;
+			url = `https://www.youtube.com/watch?v=${latest.id}`;
+			mode = latest.chapters.length ? "chapters" : "custom";
+			result = null;
+			error = "";
+			status = latest.chapters.length
+				? `Loaded ${latest.chapters.length} chapters from the extension`
+				: "The extension video has no chapters";
+		} catch (cause) {
+			error = String(cause);
+		}
+	}
+
 	async function fetchVideo() {
 		busy = "fetch"; error = ""; result = null; status = "Reading video metadata with yt-dlp…";
 		try {
-			if (!url.trim()) url = await invoke<string>("get_youtube_webview_url");
+			if (!url.trim()) throw new Error("Paste a YouTube URL, or use the Chrome extension.");
 			video = await invoke<VideoInfo>("get_youtube_video_info", { url });
 			video.chapters = video.chapters.map((chapter) => ({ ...chapter, selected: true }));
 			status = video.chapters.length ? `Found ${video.chapters.length} chapters` : "Video loaded — add custom timestamps to continue";
 			if (!video.chapters.length) mode = "custom";
 		} catch (cause) { error = String(cause); status = "Could not load video"; }
 		finally { busy = null; }
-	}
-
-	async function useOpenVideo() {
-		try {
-			url = await invoke<string>("get_youtube_webview_url");
-			await fetchVideo();
-		} catch (cause) {
-			error = String(cause);
-		}
 	}
 
 	function timeToSeconds(value: string) {
@@ -117,9 +133,8 @@
 		</div>
 
 		<Card.Root>
-			<Card.Header><Card.Title>1. Fetch chapters</Card.Title><Card.Description>Use the video currently open on the left, or paste a YouTube URL.</Card.Description></Card.Header>
+			<Card.Header><Card.Title>1. Fetch chapters</Card.Title><Card.Description>Paste a YouTube URL here, or use the separate Chrome extension.</Card.Description></Card.Header>
 			<Card.Content class="flex flex-col gap-3">
-				<Button class="w-full" disabled={busy !== null || !toolsReady} onclick={useOpenVideo}>{#if busy === "fetch"}<LoaderCircleIcon data-icon="inline-start" class="animate-spin" />{:else}<YoutubeIcon data-icon="inline-start" />{/if}Fetch open video</Button>
 				<div class="flex gap-2"><Input aria-label="YouTube URL" placeholder="Or paste YouTube URL…" bind:value={url} onkeydown={(event) => event.key === "Enter" && fetchVideo()} /><Button variant="outline" disabled={busy !== null || !toolsReady || !url.trim()} onclick={fetchVideo}>Fetch</Button></div>
 				{#if video}<div class="flex items-center gap-3 rounded-lg border bg-muted/30 p-2">{#if video.thumbnail}<img class="h-12 w-20 rounded-md object-cover" src={video.thumbnail} alt="" />{/if}<div class="min-w-0"><p class="line-clamp-2 text-sm font-medium">{video.title}</p><p class="text-muted-foreground text-xs">{formatTime(video.duration)} · {video.chapters.length} chapters</p></div></div>{/if}
 			</Card.Content>

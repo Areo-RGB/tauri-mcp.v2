@@ -3,6 +3,7 @@
 	import { invoke } from "@tauri-apps/api/core";
 	import AppSidebar from "$lib/components/app-sidebar.svelte";
 	import ClipboardSaver from "$lib/components/clipboard-saver.svelte";
+	import AdbPane from "$lib/components/adb-pane.svelte";
 	import YouTubeWebviewHost from "$lib/components/youtube-webview-host.svelte";
 	import YouTubeClipper from "$lib/components/youtube-clipper.svelte";
 	import * as Breadcrumb from "$lib/components/ui/breadcrumb/index.js";
@@ -22,7 +23,7 @@
 	import { onDestroy, onMount } from "svelte";
 
 	type HubTarget = "windows" | "wsl";
-	type AppTab = HubTarget | "clipboard" | "youtube";
+	type AppTab = HubTarget | "clipboard" | "youtube" | "adb";
 
 	interface HubProcessInfo {
 		running: boolean;
@@ -71,6 +72,7 @@
 	let busy: HubTarget | null = $state(null);
 	let message = $state("");
 	let logsOpen = $state(false);
+	let youtubeLogsOpen = $state(false);
 	let statusInterval: number | undefined;
 	let endpointInterval: number | undefined;
 	let sshReachability = $state<EndpointReachability | null>(null);
@@ -197,7 +199,7 @@
 							<Breadcrumb.Page>
 								{activeHub
 									? `${activeHub.label} · :${activeHub.port}`
-									: activeTab === "youtube" ? "YouTube Clipper · Native" : "Clipboard Saver"}
+									: activeTab === "youtube" ? "YouTube Clipper · Native" : activeTab === "adb" ? "ADB · Android Tools" : "Clipboard Saver"}
 							</Breadcrumb.Page>
 						</Breadcrumb.Item>
 					</Breadcrumb.List>
@@ -247,10 +249,19 @@
 		{#if activeTab === "clipboard"}
 			<ClipboardSaver />
 		{:else if activeTab === "youtube"}
-			<div class="grid min-h-0 flex-1 grid-cols-[minmax(0,3fr)_minmax(20rem,1fr)] overflow-hidden">
-				<YouTubeWebviewHost />
-				<div class="min-h-0 border-l"><YouTubeClipper /></div>
+			<div class="flex min-h-0 flex-1 overflow-hidden">
+				<div class="min-w-0 flex-1"><YouTubeClipper /></div>
+				<aside
+					class="bg-background min-h-0 shrink-0 border-l transition-[width] duration-200"
+					class:w-12={!youtubeLogsOpen}
+					class:w-96={youtubeLogsOpen}
+					aria-label="Extension activity sidebar"
+				>
+					<YouTubeWebviewHost collapsed={!youtubeLogsOpen} onToggle={() => youtubeLogsOpen = !youtubeLogsOpen} />
+				</aside>
 			</div>
+		{:else if activeTab === "adb"}
+			<AdbPane />
 		{:else}
 			<section class="webview-stack">
 				{#each hubEntries as [target, hub] (target)}

@@ -1,0 +1,16 @@
+:root { color-scheme: light dark; font: 13px system-ui, sans-serif; }
+body { margin: 0; width: 360px; background: Canvas; color: CanvasText; }
+header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px; border-bottom: 1px solid color-mix(in srgb, CanvasText 15%, transparent); }
+h1 { font-size: 15px; margin: 0; } p { margin: 3px 0 0; opacity: .65; }
+#status { border: 1px solid currentColor; border-radius: 999px; padding: 3px 8px; font-size: 11px; }
+#status.connected { color: #16803a; } #status.offline { color: #c62828; }
+main { display: grid; gap: 12px; padding: 12px 16px 16px; }
+.actions { display: flex; gap: 8px; }
+button { border: 0; border-radius: 6px; padding: 8px 12px; background: #065fd4; color: white; cursor: pointer; font-weight: 600; }
+button.secondary { background: color-mix(in srgb, CanvasText 10%, Canvas); color: CanvasText; }
+section { height: 250px; overflow: auto; border: 1px solid color-mix(in srgb, CanvasText 15%, transparent); border-radius: 7px; }
+ol { list-style: none; margin: 0; padding: 0; }
+li { display: grid; grid-template-columns: 72px 54px 1fr; gap: 8px; padding: 8px 10px; border-bottom: 1px solid color-mix(in srgb, CanvasText 10%, transparent); }
+li:last-child { border-bottom: 0; } time, .level { opacity: .65; font-family: ui-monospace, monospace; font-size: 11px; }
+.level.success { color: #16803a; opacity: 1; } .level.error { color: #c62828; opacity: 1; }
+.empty { display: block; padding: 24px; text-align: center; opacity: .6; }

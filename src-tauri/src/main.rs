@@ -3,11 +3,13 @@
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::VecDeque,
     fs::{self, File},
     io::{Read, Seek, SeekFrom},
+    net::TcpListener,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::Mutex,
+    sync::{Arc, Mutex},
     time::Duration,
 };
 use tauri::Manager;
@@ -24,6 +26,8 @@ const WINDOWS_NGROK_CONFIG: &str = r"C:\Users\paul\AppData\Local\ngrok\ngrok.yml
 const WSL_NGROK_CONFIG: &str = r"C:\Users\paul\AppData\Local\ngrok\ngrok-wsl.yml";
 const YOUTUBE_YT_DLP: &str = r"C:\Users\paul\projects\YouTube\backend\yt-dlp.exe";
 const YOUTUBE_COOKIES: &str = r"C:\Users\paul\projects\YouTube\backend\cookies.txt";
+const CHROME_EXECUTABLE: &str = r"C:\Users\paul\AppData\Local\Google\Chrome\Application\chrome.exe";
+const CHAPTER_CLIPPER_SOCKET: &str = "127.0.0.1:32145";
 const CLIPBOARD_SAMPLE_LIMIT: usize = 200_000;
 const CLIPBOARD_RUN_TIMEOUT_SECONDS: u64 = 60;
 const ALLOWED_SCRIPTS: [&str; 6] = [
@@ -499,6 +503,298 @@ async fn check_endpoint_reachability(url: String) -> Result<EndpointReachability
     .map_err(|error| format!("Endpoint check task failed: {error}"))?
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AdbDevice {
+    serial: String,
+    model: String,
+    device: String,
+    state: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AdbCommandResult {
+    ok: bool,
+    command: String,
+    stdout: String,
+    stderr: String,
+    lines: Vec<String>,
+    exit_code: Option<i32>,
+    paths: Vec<String>,
+}
+
+fn adb_executable() -> Result<PathBuf, String> {
+    find_executable(&["adb.exe", "adb"])
+        .ok_or_else(|| "adb was not found on PATH. Install Android platform-tools.".to_string())
+}
+
+fn scrcpy_executable() -> Result<PathBuf, String> {
+    find_executable(&["scrcpy.exe", "scrcpy"])
+        .ok_or_else(|| "scrcpy was not found on PATH.".to_string())
+}
+
+fn adb_result(command: String, output: std::process::Output) -> AdbCommandResult {
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let mut lines: Vec<String> = stdout.lines().map(str::to_string).collect();
+    lines.extend(stderr.lines().map(str::to_string));
+    AdbCommandResult {
+        ok: output.status.success(),
+        command,
+        stdout,
+        stderr,
+        lines,
+        exit_code: output.status.code(),
+        paths: Vec::new(),
+    }
+}
+
+fn run_adb(args: &[String]) -> Result<AdbCommandResult, String> {
+    let executable = adb_executable()?;
+    let command = format!("adb {}", args.join(" "));
+    let mut process = Command::new(executable);
+    process
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    process.creation_flags(CREATE_NO_WINDOW);
+    let output = process
+        .output()
+        .map_err(|error| format!("Could not run {command}: {error}"))?;
+    Ok(adb_result(command, output))
+}
+
+fn adb_serial_args(serial: &str, tail: &[&str]) -> Vec<String> {
+    let mut args = vec!["-s".to_string(), serial.to_string()];
+    args.extend(tail.iter().map(|value| (*value).to_string()));
+    args
+}
+
+#[tauri::command]
+fn get_adb_devices() -> Result<Vec<AdbDevice>, String> {
+    let result = run_adb(&["devices".to_string(), "-l".to_string()])?;
+    if !result.ok {
+        return Err(if result.stderr.is_empty() {
+            "adb devices failed.".to_string()
+        } else {
+            result.stderr
+        });
+    }
+    let devices = result
+        .stdout
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let serial = fields.next()?.to_string();
+            let state = fields.next()?.to_string();
+            let mut model = serial.clone();
+            let mut device = "android".to_string();
+            for field in fields {
+                if let Some(value) = field.strip_prefix("model:") {
+                    model = value.replace('_', " ");
+                }
+                if let Some(value) = field.strip_prefix("device:") {
+                    device = value.to_string();
+                }
+            }
+            Some(AdbDevice {
+                serial,
+                model,
+                device,
+                state,
+            })
+        })
+        .collect();
+    Ok(devices)
+}
+
+#[tauri::command]
+fn get_scrcpy_version() -> Result<AdbCommandResult, String> {
+    let executable = scrcpy_executable()?;
+    let mut process = Command::new(executable);
+    process
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    process.creation_flags(CREATE_NO_WINDOW);
+    let output = process
+        .output()
+        .map_err(|error| format!("Could not run scrcpy: {error}"))?;
+    Ok(adb_result("scrcpy --version".to_string(), output))
+}
+
+#[tauri::command]
+fn start_scrcpy_mirror(serials: Vec<String>) -> Result<AdbCommandResult, String> {
+    let executable = scrcpy_executable()?;
+    if serials.is_empty() {
+        return Err("Select at least one device.".to_string());
+    }
+    let mut lines = Vec::new();
+    let mut ok = true;
+    for serial in &serials {
+        let mut process = Command::new(&executable);
+        process.args(["-s", serial]);
+        #[cfg(windows)]
+        process.creation_flags(CREATE_NO_WINDOW);
+        match process.spawn() {
+            Ok(_) => lines.push(format!("Started Scrcpy for {serial}.")),
+            Err(error) => {
+                ok = false;
+                lines.push(format!("Could not start Scrcpy for {serial}: {error}"));
+            }
+        }
+    }
+    Ok(AdbCommandResult {
+        ok,
+        command: "scrcpy mirror".to_string(),
+        stdout: lines.join("\n"),
+        stderr: String::new(),
+        lines,
+        exit_code: Some(if ok { 0 } else { 1 }),
+        paths: Vec::new(),
+    })
+}
+
+#[tauri::command]
+fn take_adb_screenshots(serials: Vec<String>) -> Result<AdbCommandResult, String> {
+    if serials.is_empty() {
+        return Err("Select at least one device.".to_string());
+    }
+    let folder = dirs::picture_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("MCPHub")
+        .join("ADB Screenshots");
+    fs::create_dir_all(&folder)
+        .map_err(|error| format!("Could not create screenshot folder: {error}"))?;
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let mut result = AdbCommandResult {
+        ok: true,
+        command: "adb screencap".to_string(),
+        stdout: String::new(),
+        stderr: String::new(),
+        lines: Vec::new(),
+        exit_code: Some(0),
+        paths: Vec::new(),
+    };
+    for serial in serials {
+        let args = adb_serial_args(&serial, &["exec-out", "screencap", "-p"]);
+        let executable = adb_executable()?;
+        let mut process = Command::new(executable);
+        process
+            .args(&args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        #[cfg(windows)]
+        process.creation_flags(CREATE_NO_WINDOW);
+        let output = process
+            .output()
+            .map_err(|error| format!("Could not capture {serial}: {error}"))?;
+        if output.status.success() && output.stdout.len() > 8 {
+            let path = folder.join(format!("adb-{serial}-{stamp}.png"));
+            fs::write(&path, output.stdout)
+                .map_err(|error| format!("Could not save screenshot: {error}"))?;
+            result.paths.push(path.to_string_lossy().into_owned());
+            result
+                .lines
+                .push(format!("Saved screenshot for {serial}: {}", path.display()));
+        } else {
+            result.ok = false;
+            result.lines.push(format!(
+                "Screenshot failed for {serial}: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+    }
+    result.stdout = result.lines.join("\n");
+    result.exit_code = Some(if result.ok { 0 } else { 1 });
+    Ok(result)
+}
+
+#[tauri::command]
+fn export_adb_specs(serials: Vec<String>) -> Result<AdbCommandResult, String> {
+    if serials.is_empty() {
+        return Err("Select at least one device.".to_string());
+    }
+    let folder = dirs::document_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("MCPHub")
+        .join("ADB Specs");
+    fs::create_dir_all(&folder)
+        .map_err(|error| format!("Could not create specs folder: {error}"))?;
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let mut result = AdbCommandResult {
+        ok: true,
+        command: "adb shell getprop".to_string(),
+        stdout: String::new(),
+        stderr: String::new(),
+        lines: Vec::new(),
+        exit_code: Some(0),
+        paths: Vec::new(),
+    };
+    for serial in serials {
+        let command = run_adb(&adb_serial_args(&serial, &["shell", "getprop"]))?;
+        let path = folder.join(format!("adb-{serial}-{stamp}.txt"));
+        fs::write(&path, &command.stdout)
+            .map_err(|error| format!("Could not save specs: {error}"))?;
+        result
+            .lines
+            .push(format!("Saved specs for {serial}: {}", path.display()));
+        result.paths.push(path.to_string_lossy().into_owned());
+        if !command.ok {
+            result.ok = false;
+        }
+    }
+    result.stdout = result.lines.join("\n");
+    result.exit_code = Some(if result.ok { 0 } else { 1 });
+    Ok(result)
+}
+
+#[tauri::command]
+fn install_adb_apk(apk_path: String, serials: Vec<String>) -> Result<AdbCommandResult, String> {
+    let apk = Path::new(apk_path.trim());
+    if !apk.is_file() {
+        return Err("Select an existing APK file.".to_string());
+    }
+    if serials.is_empty() {
+        return Err("Select at least one device.".to_string());
+    }
+    let mut result = AdbCommandResult {
+        ok: true,
+        command: format!("adb install {}", apk.display()),
+        stdout: String::new(),
+        stderr: String::new(),
+        lines: Vec::new(),
+        exit_code: Some(0),
+        paths: Vec::new(),
+    };
+    for serial in serials {
+        let mut args = adb_serial_args(&serial, &["install", "-r"]);
+        args.push(apk.to_string_lossy().into_owned());
+        let command = run_adb(&args)?;
+        result.lines.push(format!(
+            "{serial}: {}",
+            if command.ok {
+                command.stdout
+            } else {
+                command.stderr
+            }
+        ));
+        if !command.ok {
+            result.ok = false;
+        }
+    }
+    result.stdout = result.lines.join("\n");
+    result.exit_code = Some(if result.ok { 0 } else { 1 });
+    Ok(result)
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct YouTubeToolsStatus {
@@ -518,7 +814,7 @@ struct YouTubeChapter {
     duration: f64,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct YouTubeVideoInfo {
     id: String,
@@ -838,77 +1134,171 @@ async fn process_youtube_video(
 }
 
 #[tauri::command]
-async fn set_youtube_webview_bounds(
-    app: tauri::AppHandle,
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-    visible: bool,
-) -> Result<(), String> {
-    if let Some(webview) = app.get_webview("youtube") {
-        if visible {
-            webview
-                .set_position(tauri::LogicalPosition::new(x, y))
-                .map_err(|error| error.to_string())?;
-            webview
-                .set_size(tauri::LogicalSize::new(width.max(1.0), height.max(1.0)))
-                .map_err(|error| error.to_string())?;
-            webview.show().map_err(|error| error.to_string())?;
-        } else {
-            webview.hide().map_err(|error| error.to_string())?;
-        }
-        return Ok(());
+fn open_youtube_chrome() -> Result<(), String> {
+    if !Path::new(CHROME_EXECUTABLE).is_file() {
+        return Err(format!("Chrome was not found at {CHROME_EXECUTABLE}"));
     }
-    if !visible {
-        return Ok(());
-    }
-    let window = app
-        .get_window("main")
-        .ok_or_else(|| "Main window is unavailable.".to_string())?;
-    let url = "https://www.youtube.com/"
-        .parse()
-        .map_err(|error| format!("Invalid YouTube URL: {error}"))?;
-    let builder = tauri::webview::WebviewBuilder::new("youtube", tauri::WebviewUrl::External(url))
-        .initialization_script(include_str!("../youtube-webview-init.js"))
-        .on_page_load(|webview, payload| {
-            if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
-                let _ = webview.eval(include_str!("../youtube-webview-init.js"));
-            }
-        })
-        .enable_clipboard_access()
-        .focused(true);
-    match window.add_child(
-        builder,
-        tauri::LogicalPosition::new(x, y),
-        tauri::LogicalSize::new(width.max(1.0), height.max(1.0)),
-    ) {
-        Ok(_) => Ok(()),
-        Err(error) if error.to_string().contains("already exists") => {
-            let webview = app
-                .get_webview("youtube")
-                .ok_or_else(|| format!("Could not reuse the YouTube webview: {error}"))?;
-            webview
-                .set_position(tauri::LogicalPosition::new(x, y))
-                .map_err(|error| error.to_string())?;
-            webview
-                .set_size(tauri::LogicalSize::new(width.max(1.0), height.max(1.0)))
-                .map_err(|error| error.to_string())?;
-            webview.show().map_err(|error| error.to_string())
-        }
-        Err(error) => Err(format!("Could not create the YouTube webview: {error}")),
+    Command::new(CHROME_EXECUTABLE)
+        .arg("https://www.youtube.com/")
+        .spawn()
+        .map_err(|error| format!("Could not launch Chrome: {error}"))?;
+    Ok(())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ChapterClipperSocketRequest {
+    action: Option<String>,
+    url: Option<String>,
+    chapters: Option<Vec<YouTubeChapter>>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ChapterClipperLogEntry {
+    timestamp: String,
+    level: String,
+    message: String,
+}
+
+#[derive(Clone, Default)]
+struct ChapterClipperLogState(Arc<Mutex<VecDeque<ChapterClipperLogEntry>>>);
+
+#[derive(Clone, Default)]
+struct LatestYouTubeVideoState(Arc<Mutex<Option<YouTubeVideoInfo>>>);
+
+fn chapter_clipper_log(
+    logs: &Arc<Mutex<VecDeque<ChapterClipperLogEntry>>>,
+    level: &str,
+    message: impl Into<String>,
+) {
+    let Ok(mut entries) = logs.lock() else { return };
+    entries.push_back(ChapterClipperLogEntry {
+        timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
+        level: level.to_string(),
+        message: message.into(),
+    });
+    while entries.len() > 100 {
+        entries.pop_front();
     }
 }
 
 #[tauri::command]
-fn get_youtube_webview_url(app: tauri::AppHandle) -> Result<String, String> {
-    let webview = app
-        .get_webview("youtube")
-        .ok_or_else(|| "YouTube webview is not open yet.".to_string())?;
-    webview
-        .url()
-        .map(|url| url.to_string())
-        .map_err(|error| format!("Could not read the open YouTube URL: {error}"))
+fn get_chapter_clipper_logs(
+    state: tauri::State<'_, ChapterClipperLogState>,
+) -> Vec<ChapterClipperLogEntry> {
+    state
+        .0
+        .lock()
+        .map(|entries| entries.iter().cloned().collect())
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+fn get_latest_extension_video(
+    state: tauri::State<'_, LatestYouTubeVideoState>,
+) -> Option<YouTubeVideoInfo> {
+    state.0.lock().ok().and_then(|video| video.clone())
+}
+
+fn start_chapter_clipper_socket(
+    logs: Arc<Mutex<VecDeque<ChapterClipperLogEntry>>>,
+    latest_video: Arc<Mutex<Option<YouTubeVideoInfo>>>,
+) -> Result<(), String> {
+    let listener = TcpListener::bind(CHAPTER_CLIPPER_SOCKET)
+        .map_err(|error| format!("Could not start Chapter Clipper socket: {error}"))?;
+    chapter_clipper_log(
+        &logs,
+        "info",
+        format!("Listening on ws://{CHAPTER_CLIPPER_SOCKET}"),
+    );
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let logs = Arc::clone(&logs);
+            let latest_video = Arc::clone(&latest_video);
+            std::thread::spawn(move || {
+                let Ok(mut socket) = tungstenite::accept(stream) else {
+                    chapter_clipper_log(&logs, "error", "Extension WebSocket handshake failed");
+                    return;
+                };
+                chapter_clipper_log(&logs, "info", "Extension connected");
+                while let Ok(message) = socket.read() {
+                    if !message.is_text() {
+                        continue;
+                    }
+                    let request = serde_json::from_str::<ChapterClipperSocketRequest>(
+                        message.to_text().unwrap_or_default(),
+                    );
+                    let payload = match request {
+                        Ok(request) if request.action.as_deref() == Some("ping") => {
+                            chapter_clipper_log(
+                                &logs,
+                                "success",
+                                "Extension status check succeeded",
+                            );
+                            serde_json::json!({ "success": true, "ready": true })
+                        }
+                        Ok(request) if request.action.as_deref() == Some("fetch-chapters") => {
+                            let url = request.url.unwrap_or_default();
+                            chapter_clipper_log(&logs, "info", "Fetching chapters with yt-dlp");
+                            match youtube_info(&url) {
+                                Ok(info) => {
+                                    chapter_clipper_log(
+                                        &logs,
+                                        "success",
+                                        format!("yt-dlp found {} chapter(s)", info.chapters.len()),
+                                    );
+                                    if let Ok(mut latest) = latest_video.lock() {
+                                        *latest = Some(info.clone());
+                                    }
+                                    serde_json::json!({ "success": true, "result": info })
+                                }
+                                Err(error) => {
+                                    chapter_clipper_log(&logs, "error", &error);
+                                    serde_json::json!({ "success": false, "error": error })
+                                }
+                            }
+                        }
+                        Ok(request) => {
+                            let url = request.url.unwrap_or_default();
+                            let chapters = request.chapters.unwrap_or_default();
+                            chapter_clipper_log(
+                                &logs,
+                                "info",
+                                format!("Processing {} chapter(s)", chapters.len()),
+                            );
+                            match process_youtube_video_inner(url, chapters) {
+                                Ok(result) => {
+                                    chapter_clipper_log(
+                                        &logs,
+                                        "success",
+                                        format!("Created {} clip(s)", result.clips.len()),
+                                    );
+                                    serde_json::json!({ "success": true, "result": result })
+                                }
+                                Err(error) => {
+                                    chapter_clipper_log(&logs, "error", &error);
+                                    serde_json::json!({ "success": false, "error": error })
+                                }
+                            }
+                        }
+                        Err(error) => {
+                            let error = format!("Invalid extension request: {error}");
+                            chapter_clipper_log(&logs, "error", &error);
+                            serde_json::json!({ "success": false, "error": error })
+                        }
+                    };
+                    if socket
+                        .send(tungstenite::Message::Text(payload.to_string().into()))
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            });
+        }
+    });
+    Ok(())
 }
 
 #[derive(Clone, Serialize)]
@@ -1323,7 +1713,23 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .manage(HubProcessState::default())
         .manage(ClipboardCache::default())
+        .manage(ChapterClipperLogState::default())
+        .manage(LatestYouTubeVideoState::default())
         .setup(|app| {
+            let clipper_logs = Arc::clone(&app.state::<ChapterClipperLogState>().0);
+            let latest_video = Arc::clone(&app.state::<LatestYouTubeVideoState>().0);
+            start_chapter_clipper_socket(clipper_logs, latest_video)
+                .map_err(std::io::Error::other)?;
+            let main_window =
+                tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
+                    .title("MCPHub")
+                    .inner_size(1280.0, 820.0)
+                    .min_inner_size(900.0, 600.0)
+                    .resizable(true)
+                    .center();
+
+            main_window.build()?;
+
             #[cfg(windows)]
             {
                 autostart_windows_hub(app.state::<HubProcessState>().inner());
@@ -1335,11 +1741,18 @@ fn main() {
             get_hub_process_status,
             stop_hub_process,
             check_endpoint_reachability,
+            get_adb_devices,
+            get_scrcpy_version,
+            start_scrcpy_mirror,
+            take_adb_screenshots,
+            export_adb_specs,
+            install_adb_apk,
             get_youtube_tools_status,
             get_youtube_video_info,
             process_youtube_video,
-            set_youtube_webview_bounds,
-            get_youtube_webview_url,
+            open_youtube_chrome,
+            get_chapter_clipper_logs,
+            get_latest_extension_video,
             get_clipboard_snapshot,
             detect_clipboard_type,
             save_clipboard_text,

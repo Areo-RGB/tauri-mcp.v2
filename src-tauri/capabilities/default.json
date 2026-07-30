@@ -3,7 +3,6 @@
   "identifier": "default",
   "description": "Default capability for the MCPHub desktop window",
   "windows": ["main"],
-  "webviews": ["main", "youtube"],
-  "remote": { "urls": ["https://www.youtube.com/*", "https://youtube.com/*"] },
+  "webviews": ["main"],
   "permissions": ["core:default", "dialog:allow-open"]
 }

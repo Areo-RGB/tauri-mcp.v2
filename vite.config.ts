@@ -9,5 +9,10 @@ export default defineConfig({
   resolve: {
     alias: { $lib: fileURLToPath(new URL('./src/lib', import.meta.url)) }
   },
-  server: { host: '127.0.0.1', port: 5174, strictPort: true }
+  server: {
+    host: '127.0.0.1',
+    port: 5174,
+    strictPort: true,
+    watch: { ignored: ['**/src-tauri/target/**'] }
+  }
 });

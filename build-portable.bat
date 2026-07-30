@@ -24,10 +24,6 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo Preparing Chromium extensions for the YouTube webview...
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%PROJECT_DIR%\install-browser-extensions.ps1"
-if errorlevel 1 goto :failed
-
 echo Installing frontend dependencies...
 call pnpm install --no-frozen-lockfile
 if errorlevel 1 goto :failed
@@ -40,14 +36,16 @@ set "DESKTOP=%USERPROFILE%\Desktop"
 copy /y "src-tauri\target\release\MCPHub-Frontend.exe" "%DESKTOP%\MCPHub-Frontend.exe" >nul
 if errorlevel 1 goto :failed
 
-set "PORTABLE_EXTENSIONS=%DESKTOP%\MCPHub-Frontend-data\extensions"
-if exist "%PORTABLE_EXTENSIONS%" rmdir /s /q "%PORTABLE_EXTENSIONS%"
-xcopy /e /i /y "src-tauri\extensions" "%PORTABLE_EXTENSIONS%" >nul
+set "PORTABLE_EXTENSION=%DESKTOP%\MCPHub-Frontend-extension"
+if exist "%PORTABLE_EXTENSION%" rmdir /s /q "%PORTABLE_EXTENSION%"
+xcopy /e /i /y "src-tauri\extensions\chapter-clipper" "%PORTABLE_EXTENSION%" >nul
 if errorlevel 1 goto :failed
 
 echo.
 echo Portable executable on your Desktop:
 echo %DESKTOP%\MCPHub-Frontend.exe
+echo Chrome extension folder:
+echo %PORTABLE_EXTENSION%
 
 echo Starting the portable application...
 start "" "%DESKTOP%\MCPHub-Frontend.exe"

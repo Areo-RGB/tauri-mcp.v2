@@ -1,6 +1,8 @@
 .env
 client_secret.json
-/src-tauri/extensions/
+/src-tauri/extensions/*
+!/src-tauri/extensions/chapter-clipper/
+!/src-tauri/extensions/chapter-clipper/**
 /node_modules/
 /dist/
 /src-tauri/target/

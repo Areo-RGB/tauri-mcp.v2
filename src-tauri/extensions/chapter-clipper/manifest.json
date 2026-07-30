@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "MCPHub Chapter Clipper",
+  "version": "1.0.0",
+  "description": "Send selected YouTube chapters to the local MCPHub Rust app.",
+  "action": { "default_popup": "popup.html", "default_title": "MCPHub Chapter Clipper" },
+  "background": { "service_worker": "background.js" },
+  "permissions": ["storage"],
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src ws://127.0.0.1:32145"
+  }
+}

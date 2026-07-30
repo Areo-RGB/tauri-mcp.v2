@@ -11,20 +11,8 @@
   },
   "app": {
     "security": {
-      "csp": "default-src 'self' customprotocol: asset:; connect-src 'self' http://localhost:3000 http://localhost:3001; frame-src http://localhost:3000 http://localhost:3001; img-src 'self' asset: http://asset.localhost data: blob: http: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:"
-    },
-    "windows": [
-      {
-        "title": "MCPHub",
-        "width": 1280,
-        "height": 820,
-        "minWidth": 900,
-        "minHeight": 600,
-        "resizable": true,
-        "fullscreen": false,
-        "center": true
-      }
-    ]
+      "csp": null
+    }
   },
   "bundle": {
     "active": false,
