@@ -35,6 +35,7 @@ const CHROME_EXECUTABLE: &str = r"C:\Users\paul\AppData\Local\Google\Chrome\Appl
 const YOUTUBE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const YOUTUBE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const YOUTUBE_API_URL: &str = "https://www.googleapis.com/youtube/v3";
+const YOUTUBE_UPLOAD_URL: &str = "https://www.googleapis.com/upload/youtube/v3";
 const YOUTUBE_SCOPES: &str =
     "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube";
 const CHAPTER_CLIPPER_SOCKET: &str = "127.0.0.1:32145";
@@ -1388,7 +1389,7 @@ fn upload_youtube_clip(
         "status": { "privacyStatus": "private" }
     });
     let response = client
-        .post(format!("{YOUTUBE_API_URL}/videos"))
+        .post(format!("{YOUTUBE_UPLOAD_URL}/videos"))
         .bearer_auth(token)
         .query(&[("uploadType", "resumable"), ("part", "snippet,status")])
         .header("Content-Type", "application/json; charset=UTF-8")
@@ -1402,6 +1403,18 @@ fn upload_youtube_clip(
                 clip.title
             )
         })?;
+    if !response.status().is_success() {
+        return match response_text(
+            response,
+            &format!("Starting the YouTube upload for {}", clip.title),
+        ) {
+            Err(error) => Err(error),
+            Ok(_) => Err(format!(
+                "YouTube rejected the upload initialization for {}.",
+                clip.title
+            )),
+        };
+    }
     let location = response
         .headers()
         .get(reqwest::header::LOCATION)
@@ -1412,6 +1425,7 @@ fn upload_youtube_clip(
         .put(location)
         .bearer_auth(token)
         .header("Content-Type", "video/mp4")
+        .header(reqwest::header::CONTENT_LENGTH, length)
         .body(file)
         .send()
         .map_err(|error| format!("Could not upload {} to YouTube: {error}", clip.title))?;
