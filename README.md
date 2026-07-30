@@ -1,101 +1,76 @@
-# MCPHub Tauri Frontend
+# MCPHub Tools — Electron
 
-The packaged Tauri interface is a dedicated Svelte app in `shell/`. Its sidebar
-contains persistent Windows (`http://localhost:3000`) and WSL
-(`http://localhost:3001`) dashboard tabs plus host-specific build, start,
-restart, and stop controls. The existing React application remains the MCPHub
-dashboard rendered inside each tab.
+Windows desktop tools built entirely with Electron, Node.js, Svelte, and TypeScript.
+The Tauri/Rust backend and the Windows/WSL MCPHub dashboards have been removed.
 
-Windows desktop frontend for MCPHub. Starting the executable automatically runs
-`node C:\Users\paul\projects\mcp_UI\mcphub\dist\index.js` on port `3000`, then starts the
-`mcp-hub-windows` ngrok tunnel. The login page is bypassed because this setup
-uses MCPHub's `skipAuth` mode.
+## Included tools
 
-The automatic launcher uses:
+- **YouTube Clipper** — yt-dlp metadata/downloads, FFmpeg chapter cutting,
+  Google Drive handoff, Google OAuth, playlist management, resumable uploads,
+  and the Chapter Clipper WebSocket server on `127.0.0.1:32145`.
+- **ADB / Scrcpy** — device discovery, mirroring, screenshots, property exports,
+  and APK installation.
+- **Clipboard Saver** — live Windows clipboard preview, file-type detection,
+  Desktop saves, and guarded execution for Python, JavaScript/TypeScript,
+  PowerShell, and batch files.
 
-- MCPHub working directory: `C:\Users\paul\projects\mcp_UI\mcphub`
-- MCPHub entry point: `C:\Users\paul\projects\mcp_UI\mcphub\dist\index.js`
-- ngrok config: `C:\Users\paul\AppData\Local\ngrok\ngrok.yml`
-- ngrok command: `ngrok start mcp-hub-windows --config <config>`
+The Svelte renderer cannot access Node directly. A context-isolated Electron
+preload exposes only the allowlisted commands used by these three tools.
 
-The Dashboard Hub Controls are split into independent Windows and WSL tabs.
-Windows uses port `3000` with `ngrok.yml`; WSL commands run through `wsl.exe`
-on port `3001` and use
-`C:\Users\paul\AppData\Local\ngrok\ngrok-wsl.yml` with the
-`mcp-hub-wsl` endpoint. Both tabs can launch these scripts from their selected
-MCPHub source folder:
+## Development
 
-The Tauri desktop shell also embeds the complete MCPHub dashboards in persistent
-host tabs: Windows at `http://localhost:3000` and WSL at
-`http://localhost:3001`. Switching tabs changes the visible dashboard webview,
-while the Processes button opens the build/start/stop controls.
+Requirements:
 
-- `pnpm build`
-- `node C:\Users\paul\projects\mcp_UI\mcphub\dist\index.js` (`Start Hub`)
-- `pnpm backend:dev`
-- `pnpm backend:debug`
-- `pnpm dev`
-- `pnpm debug`
-
-Only this fixed allowlist can be invoked. The selected folder must contain a
-`package.json`. Long-running commands start without an extra console window and
-can be stopped or restarted from the dashboard. Starting or restarting the
-normal `start` script also starts ngrok. Their latest output is shown in the
-expandable Command output area.
-
-## Run in development
+- Node.js 20 or newer
+- Corepack/pnpm
 
 ```powershell
 corepack enable
 pnpm install
-pnpm tauri:dev
+pnpm electron:dev
 ```
 
-## Build the portable Windows executable
+No Rust compiler, Cargo, WebView2 SDK, or MCPHub backend is required.
 
-Run `build-portable.bat` from any location. The script resolves its own project
-directory and writes:
+## Portable Windows build
 
-```text
-dist-portable\MCPHub-Frontend.exe
+Run from any folder:
+
+```powershell
+.\build-portable.bat
 ```
 
-Requirements:
+The script builds `dist-electron\MCPHub-Frontend.exe` and copies it to the
+Desktop. `build-debug.bat` creates an unpacked development build under
+`dist-electron\win-unpacked`.
 
-- Node.js 20 or newer with Corepack/pnpm
-- Official Rust stable MSVC toolchain
-- Microsoft C++ Build Tools with the Desktop development with C++ workload
-- Microsoft Edge WebView2 Runtime (included with current Windows 10/11)
+## YouTube setup
 
-The Tauri bundle step is intentionally disabled. The release binary itself is
-the portable single-file app; there is no installer and no embedded backend.
+Put these values in a `.env` next to the project during development or next to
+the portable executable:
 
-## Backend URL
+```dotenv
+GOOGLE_CLIENT_ID=your-desktop-oauth-client-id
+GOOGLE_CLIENT_SECRET=your-desktop-oauth-client-secret
+YOUTUBE_DRIVE_DIR=G:\My Drive\video-drives
+```
 
-The frontend is fixed to `http://localhost:3000`, including its desktop content
-security policy.
+Enable YouTube Data API v3 and use a Google desktop OAuth client. Tokens remain
+in `%APPDATA%\MCPHub\youtube-token.json`.
 
-The backend must allow requests from the Tauri webview origin and support
-credentials if Better Auth is enabled. Token-based MCPHub login works through
-the normal `/api/auth/login` endpoint.
+The app checks for:
 
-## YouTube clip uploads
+- `C:\Users\paul\projects\YouTube\backend\yt-dlp.exe`, then `yt-dlp` on PATH
+- `ffmpeg` and `ffprobe` on PATH
+- optional cookies at `C:\Users\paul\projects\YouTube\backend\cookies.txt`
 
-After a video is downloaded and its clips are created, the complete video
-folder is moved into the `vgl2014er` Google Drive mounted at
-`G:\My Drive\video-drives`. Set `YOUTUBE_DRIVE_DIR` before launching MCPHub to
-use a different mounted Drive or rclone mount. Existing folders are preserved;
-repeat downloads receive a numeric suffix.
+The unpacked Chrome extension is in `extensions\chapter-clipper`. Load that
+folder through `chrome://extensions` with Developer mode enabled. It talks
+directly to the Electron-owned WebSocket server; the old Rust native-messaging
+host is no longer required.
 
-The bundled Chapter Clipper Chrome extension adds a playlist selector beside
-YouTube's Transcript tab and an Upload button to every chapter row. Keep MCPHub
-running, select a playlist, and click a chapter's button to download the source,
-cut that chapter, move the files to Google Drive, upload the clip privately, and
-add it to the selected playlist. The panel-level button runs the same workflow
-for every chapter.
+## Security boundary
 
-Enable the YouTube Data API v3 in a Google Cloud project and create a desktop
-OAuth client. Put the client values in the project `.env` as
-`GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. In YouTube Clipper, choose
-**Connect with Google** to authorize the account, load or create a playlist,
-and upload the generated clips directly into it.
+The BrowserWindow uses context isolation, renderer sandboxing, disabled Node
+integration, a fixed preload bridge, an IPC command allowlist, and external-link
+interception. File selection is handled by Electron's native dialog.

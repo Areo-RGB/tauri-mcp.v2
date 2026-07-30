@@ -1,12 +1,9 @@
 .env
 client_secret.json
 youtube-data-*.json
-/src-tauri/extensions/*
-!/src-tauri/extensions/chapter-clipper/
-!/src-tauri/extensions/chapter-clipper/**
 /node_modules/
 /dist/
-/src-tauri/target/
+/dist-electron/
 /apps/
 *.log
 mediav-460b1be2565e.json

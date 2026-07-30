@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { invoke } from "@tauri-apps/api/core";
+	import { invoke } from "$lib/desktop";
 	import { Badge } from "$lib/components/ui/badge";
 	import { Button } from "$lib/components/ui/button";
 	import * as Card from "$lib/components/ui/card";
