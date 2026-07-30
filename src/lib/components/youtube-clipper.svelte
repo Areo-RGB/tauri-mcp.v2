@@ -33,10 +33,10 @@
 
 	const TIMESTAMP_PROMPT = `Can you use the transcript to find only the drills mentioned in the video and give the start and end timestamp for each drill? Check the video title to verify the expected number of drills before answering. Do not use a markdown table or bullets. Return one line per drill in this exact format:
 
-Drill Name | Start | End
+Drill name: start - end
 
 Example:
-Jump Squats | 0:26 | 0:56
+Jump Squats: 0:26 - 0:56
 ExampleEnd`;
 
 	let tools = $state<ToolsStatus | null>(null);
@@ -232,18 +232,21 @@ ExampleEnd`;
 	function parseTimestamps() {
 		error = "";
 		const chapters: Chapter[] = [];
-		for (const line of customText.replace(/\|\s*\|/g, "|\n|").split("\n")) {
-			const cells = line.split("|").map((cell) => cell.trim()).filter(Boolean);
-			if (cells.length < 3 || cells.some((cell) => cell.includes("---"))) continue;
-			const title = cells[0].replaceAll("**", "");
-			if (["title", "name", "drill name", "#"].includes(title.toLowerCase())) continue;
-			const startTime = timeToSeconds(cells[1]); const endTime = timeToSeconds(cells[2]);
+		for (const line of customText.split("\n")) {
+			const timestamps = [...line.matchAll(/\b\d+(?::\d{1,2}){1,2}\b/g)];
+			if (timestamps.length < 2) continue;
+			const startText = timestamps[0][0];
+			const endText = timestamps[1][0];
+			const startIndex = timestamps[0].index ?? line.length;
+			const title = line.slice(0, startIndex).replace(/[\s|:,-]+$/, "").trim();
+			if (!title) continue;
+			const startTime = timeToSeconds(startText); const endTime = timeToSeconds(endText);
 			if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime <= startTime) continue;
 			chapters.push({ index: chapters.length + 1, title, startTime, endTime, duration: endTime - startTime, selected: true });
 		}
 		customChapters = chapters;
 		status = chapters.length ? `Parsed ${chapters.length} custom clips` : "No valid timestamp rows found";
-		if (!chapters.length) error = "Use one line per clip: Drill Name | 0:00 | 1:24";
+		if (!chapters.length) error = "Use one line per clip: Drill name: 0:00 - 1:24";
 	}
 
 	function formatTime(seconds: number) {
@@ -287,11 +290,11 @@ ExampleEnd`;
 				<div class="grid grid-cols-2 rounded-md border p-0.5"><Button size="sm" variant={mode === "chapters" ? "secondary" : "ghost"} onclick={() => mode = "chapters"}>Chapters</Button><Button size="sm" variant={mode === "custom" ? "secondary" : "ghost"} onclick={() => mode = "custom"}>Custom</Button></div>
 				{#if mode === "custom"}
 					<div class="flex flex-wrap items-start justify-between gap-2 rounded-md border bg-muted/30 p-3">
-						<div class="grid gap-1"><p class="text-sm font-medium">Simple timestamp format</p><p class="text-muted-foreground text-xs">One line per drill: <code>Drill Name | start | end</code></p><pre class="text-muted-foreground overflow-x-auto text-xs">Jump Squats | 0:26 | 0:56
-Jump Lunges | 0:56 | 1:29</pre></div>
+						<div class="grid gap-1"><p class="text-sm font-medium">Simple timestamp format</p><p class="text-muted-foreground text-xs">One line per drill: <code>Drill name: start - end</code></p><pre class="text-muted-foreground overflow-x-auto text-xs">Jump Squats: 0:26 - 0:56
+Jump Lunges: 0:56 - 1:29</pre></div>
 						<Button size="icon-sm" variant="outline" title="Copy transcript timestamp prompt" aria-label="Copy transcript timestamp prompt" onclick={copyTimestampPrompt}>{#if promptCopied}<CheckIcon />{:else}<CopyIcon />{/if}</Button>
 					</div>
-					<Textarea aria-label="Drill timestamps" class="min-h-32 font-mono text-xs" placeholder="Jump Squats | 0:26 | 0:56&#10;Jump Lunges | 0:56 | 1:29" bind:value={customText} />
+					<Textarea aria-label="Drill timestamps" class="min-h-32 font-mono text-xs" placeholder="Jump Squats: 0:26 - 0:56&#10;Jump Lunges: 0:56 - 1:29" bind:value={customText} />
 					<Button variant="outline" onclick={parseTimestamps}>Parse timestamps</Button>
 				{/if}
 				{#if activeChapters.length}<div class="flex items-center justify-between"><p class="text-sm font-medium">{selectedChapters.length} of {activeChapters.length} selected</p><div class="flex gap-1"><Button size="xs" variant="ghost" onclick={() => setAll(true)}>All</Button><Button size="xs" variant="ghost" onclick={() => setAll(false)}>Clear</Button></div></div><ScrollArea class="h-80 rounded-md border"><div class="divide-y">{#each activeChapters as chapter (chapter.index)}<label class="hover:bg-muted/50 flex cursor-pointer items-center gap-2 px-2 py-2.5"><Checkbox bind:checked={chapter.selected} /><span class="min-w-0 flex-1 truncate text-sm">{chapter.title}</span><span class="text-muted-foreground shrink-0 font-mono text-[11px]">{formatTime(chapter.startTime)}</span></label>{/each}</div></ScrollArea>{:else}<div class="text-muted-foreground flex min-h-28 flex-col items-center justify-center gap-2 rounded-md border border-dashed px-3 text-center text-sm"><FilmIcon class="size-5" /><p>{mode === "chapters" ? "Open a video and fetch its chapters" : "Paste and parse timestamps"}</p></div>{/if}
