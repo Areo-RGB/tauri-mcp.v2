@@ -30,6 +30,7 @@ const WINDOWS_NGROK_CONFIG: &str = r"C:\Users\paul\AppData\Local\ngrok\ngrok.yml
 const WSL_NGROK_CONFIG: &str = r"C:\Users\paul\AppData\Local\ngrok\ngrok-wsl.yml";
 const YOUTUBE_YT_DLP: &str = r"C:\Users\paul\projects\YouTube\backend\yt-dlp.exe";
 const YOUTUBE_COOKIES: &str = r"C:\Users\paul\projects\YouTube\backend\cookies.txt";
+const YOUTUBE_DRIVE_DIR: &str = r"G:\My Drive\video-drives";
 const CHROME_EXECUTABLE: &str = r"C:\Users\paul\AppData\Local\Google\Chrome\Application\chrome.exe";
 const YOUTUBE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const YOUTUBE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
@@ -1477,6 +1478,66 @@ fn youtube_output_dir() -> PathBuf {
         .join("Chapter Clipper")
 }
 
+fn youtube_drive_dir() -> PathBuf {
+    std::env::var_os("YOUTUBE_DRIVE_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(YOUTUBE_DRIVE_DIR))
+}
+
+fn copy_directory(source: &Path, destination: &Path) -> Result<(), String> {
+    fs::create_dir_all(destination)
+        .map_err(|error| format!("Could not create Google Drive folder: {error}"))?;
+    for entry in fs::read_dir(source)
+        .map_err(|error| format!("Could not read completed video folder: {error}"))?
+    {
+        let entry =
+            entry.map_err(|error| format!("Could not read completed video item: {error}"))?;
+        let target = destination.join(entry.file_name());
+        if entry
+            .file_type()
+            .map_err(|error| format!("Could not inspect completed video item: {error}"))?
+            .is_dir()
+        {
+            copy_directory(&entry.path(), &target)?;
+        } else {
+            fs::copy(entry.path(), target)
+                .map_err(|error| format!("Could not copy video to Google Drive: {error}"))?;
+        }
+    }
+    Ok(())
+}
+
+fn move_youtube_folder_to_drive(source: &Path) -> Result<PathBuf, String> {
+    let drive = youtube_drive_dir();
+    fs::create_dir_all(&drive).map_err(|error| {
+        format!(
+            "Could not access Google Drive at {}: {error}",
+            drive.display()
+        )
+    })?;
+    let folder_name = source
+        .file_name()
+        .ok_or_else(|| "Completed video folder has no name.".to_string())?;
+    let mut destination = drive.join(folder_name);
+    let mut suffix = 2;
+    while destination.exists() {
+        destination = drive.join(format!("{}_{suffix}", folder_name.to_string_lossy()));
+        suffix += 1;
+    }
+    if fs::rename(source, &destination).is_err() {
+        if let Err(error) = copy_directory(source, &destination) {
+            let _ = fs::remove_dir_all(&destination);
+            return Err(error);
+        }
+        fs::remove_dir_all(source).map_err(|error| {
+            format!(
+                "Video copied to Google Drive, but the local copy could not be removed: {error}"
+            )
+        })?;
+    }
+    Ok(destination)
+}
+
 fn youtube_executable(bundled: &str, names: &[&str]) -> Option<PathBuf> {
     let bundled_path = PathBuf::from(bundled);
     if bundled_path.is_file() {
@@ -1626,7 +1687,7 @@ fn get_youtube_tools_status() -> YouTubeToolsStatus {
         yt_dlp: youtube_executable(YOUTUBE_YT_DLP, &["yt-dlp.exe", "yt-dlp"]).is_some(),
         ffmpeg: find_executable(&["ffmpeg.exe", "ffmpeg"]).is_some(),
         ffprobe: find_executable(&["ffprobe.exe", "ffprobe"]).is_some(),
-        output_dir: youtube_output_dir().to_string_lossy().into_owned(),
+        output_dir: youtube_drive_dir().to_string_lossy().into_owned(),
     }
 }
 
@@ -1741,6 +1802,23 @@ fn process_youtube_video_inner(
     if results.is_empty() {
         return Err("No valid clips were produced.".to_string());
     }
+    let destination = move_youtube_folder_to_drive(&folder)?;
+    let video_path = destination.join(
+        video_path
+            .file_name()
+            .ok_or_else(|| "Downloaded video has no filename.".to_string())?,
+    );
+    for clip in &mut results {
+        let file_name = Path::new(&clip.file_path)
+            .file_name()
+            .ok_or_else(|| "Generated clip has no filename.".to_string())?;
+        clip.file_path = destination
+            .join("clips")
+            .join(file_name)
+            .to_string_lossy()
+            .into_owned();
+    }
+    let clips_dir = destination.join("clips");
     Ok(YouTubeProcessResult {
         title: info.title,
         video_path: video_path.to_string_lossy().into_owned(),

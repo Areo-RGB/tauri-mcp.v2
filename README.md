@@ -81,6 +81,12 @@ the normal `/api/auth/login` endpoint.
 
 ## YouTube clip uploads
 
+After a video is downloaded and its clips are created, the complete video
+folder is moved into the `vgl2014er` Google Drive mounted at
+`G:\My Drive\video-drives`. Set `YOUTUBE_DRIVE_DIR` before launching MCPHub to
+use a different mounted Drive or rclone mount. Existing folders are preserved;
+repeat downloads receive a numeric suffix.
+
 Enable the YouTube Data API v3 in a Google Cloud project and create a desktop
 OAuth client. Put the client values in the project `.env` as
 `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. In YouTube Clipper, choose

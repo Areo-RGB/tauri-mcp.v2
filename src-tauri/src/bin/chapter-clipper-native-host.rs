@@ -13,6 +13,7 @@ use std::os::windows::process::CommandExt;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 const FALLBACK_YT_DLP: &str = r"C:\Users\paul\projects\YouTube\backend\yt-dlp.exe";
+const YOUTUBE_DRIVE_DIR: &str = r"G:\My Drive\video-drives";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -124,6 +125,66 @@ fn safe_name(value: &str, fallback: &str) -> String {
     } else {
         limited.to_string()
     }
+}
+
+fn youtube_drive_dir() -> PathBuf {
+    std::env::var_os("YOUTUBE_DRIVE_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(YOUTUBE_DRIVE_DIR))
+}
+
+fn copy_directory(source: &Path, destination: &Path) -> Result<(), String> {
+    fs::create_dir_all(destination)
+        .map_err(|error| format!("Could not create Google Drive folder: {error}"))?;
+    for entry in fs::read_dir(source)
+        .map_err(|error| format!("Could not read completed video folder: {error}"))?
+    {
+        let entry =
+            entry.map_err(|error| format!("Could not read completed video item: {error}"))?;
+        let target = destination.join(entry.file_name());
+        if entry
+            .file_type()
+            .map_err(|error| format!("Could not inspect completed video item: {error}"))?
+            .is_dir()
+        {
+            copy_directory(&entry.path(), &target)?;
+        } else {
+            fs::copy(entry.path(), target)
+                .map_err(|error| format!("Could not copy video to Google Drive: {error}"))?;
+        }
+    }
+    Ok(())
+}
+
+fn move_to_google_drive(source: &Path) -> Result<PathBuf, String> {
+    let drive = youtube_drive_dir();
+    fs::create_dir_all(&drive).map_err(|error| {
+        format!(
+            "Could not access Google Drive at {}: {error}",
+            drive.display()
+        )
+    })?;
+    let folder_name = source
+        .file_name()
+        .ok_or_else(|| "Completed video folder has no name.".to_string())?;
+    let mut destination = drive.join(folder_name);
+    let mut suffix = 2;
+    while destination.exists() {
+        destination = drive.join(format!("{}_{suffix}", folder_name.to_string_lossy()));
+        suffix += 1;
+    }
+    if fs::rename(source, &destination).is_err() {
+        if let Err(error) = copy_directory(source, &destination) {
+            let _ = fs::remove_dir_all(&destination);
+            return Err(error);
+        }
+        fs::remove_dir_all(source).map_err(|error| {
+            format!(
+                "Video copied to Google Drive, but the local copy could not be removed: {error}"
+            )
+        })?;
+    }
+    Ok(destination)
 }
 
 fn cookie_file(cookies: &[Cookie]) -> Result<PathBuf, String> {
@@ -306,10 +367,21 @@ fn process(request: Request) -> Result<Response, String> {
     if let Some(path) = cookie_path {
         let _ = fs::remove_file(path);
     }
+    let destination = move_to_google_drive(&base)?;
+    for clip in &mut clips {
+        let file_name = Path::new(&clip.file_path)
+            .file_name()
+            .ok_or_else(|| "Generated clip has no filename.".to_string())?;
+        clip.file_path = destination
+            .join("clips")
+            .join(file_name)
+            .to_string_lossy()
+            .into_owned();
+    }
     Ok(Response {
         success: true,
         error: None,
-        output_dir: Some(clips_dir.to_string_lossy().into_owned()),
+        output_dir: Some(destination.join("clips").to_string_lossy().into_owned()),
         clips,
         ready: None,
     })
