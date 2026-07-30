@@ -14,7 +14,7 @@ public sealed class MainForm : Form
 
     public MainForm()
     {
-        Text = "MCPHub"; Width = 1280; Height = 820; MinimumSize = new(900, 600); StartPosition = FormStartPosition.CenterScreen; AutoScaleMode = AutoScaleMode.Dpi; AccessibleRole = AccessibleRole.Window; AccessibleName = "MCPHub desktop control center"; AccessibleDescription = "ADB, YouTube clipping, and clipboard tools.";
+        Text = "MCPHub"; Width = 1280; Height = 820; MinimumSize = new(900, 600); StartPosition = FormStartPosition.CenterScreen; AutoScaleMode = AutoScaleMode.Dpi; AccessibleRole = AccessibleRole.Window; AccessibleName = "MCPHub desktop control center"; AccessibleDescription = "ADB, YouTube clipping, clipboard, and FFmpeg media tools.";
         _youtube = new(_runner, _http); _dispatcher = new(_youtube); _pipe = new(_dispatcher); _pipe.Start();
         BuildLayout();
         FormClosing += OnClosing;
@@ -30,6 +30,7 @@ public sealed class MainForm : Form
         AddTab(tabs, "ADB", new AdbPanel(new(_runner), _lifetime.Token));
         AddTab(tabs, "YouTube Clipper", new YouTubePanel(_youtube, _dispatcher, _lifetime.Token));
         AddTab(tabs, "Clipboard Saver", new ClipboardPanel(new(_runner), _lifetime.Token));
+        AddTab(tabs, "FFmpeg", new FfmpegPanel(new FfmpegService(new CommandRunner()), _lifetime.Token));
         Controls.Add(tabs); Controls.Add(header);
     }
 
