@@ -1156,7 +1156,7 @@ fn youtube_authenticate_inner() -> Result<YouTubeAuthStatus, String> {
         .take(48)
         .map(char::from)
         .collect();
-    let mut auth_url = form_urlencoded::Serializer::new(String::from(YOUTUBE_AUTH_URL));
+    let mut auth_url = form_urlencoded::Serializer::new(format!("{YOUTUBE_AUTH_URL}?"));
     auth_url.append_pair("client_id", &client_id);
     auth_url.append_pair("redirect_uri", &redirect_uri);
     auth_url.append_pair("response_type", "code");
