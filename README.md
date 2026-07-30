@@ -1,17 +1,14 @@
 # MCPHub WinForms
 
-Native Windows desktop control center for the Windows and WSL MCPHub dashboards. The application uses .NET 10 WinForms with two persistent WebView2 dashboards and a C# backend for process control, ADB/Scrcpy, YouTube chapter processing/upload, clipboard tools, and Chrome extension integration.
+Native Windows desktop control center for ADB/Scrcpy, YouTube chapter processing/upload, clipboard tools, and Chrome extension integration. The application uses .NET 10 WinForms with horizontal tabs and a C# backend.
 
 ## Features
 
-- Windows MCPHub at `http://localhost:3000` and WSL MCPHub at `http://localhost:3001`.
-- Build, start, restart, and stop controls with ngrok lifecycle and live output.
 - ADB device selection, Scrcpy mirrors, screenshots, specs export, and APK installation.
 - yt-dlp/ffmpeg chapter clipping, mounted Drive relocation, playlists, and private YouTube uploads.
 - Live clipboard editor, format detection, Desktop saving, session history, and supported script execution.
 - Chapter Clipper Chrome extension connected through a C# native-messaging host.
 
-The Windows Hub starts with the application. Hub and ngrok processes started by MCPHub are stopped when the application exits.
 
 ## Development
 

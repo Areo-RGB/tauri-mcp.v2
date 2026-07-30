@@ -9,16 +9,6 @@ namespace MCPHub.Tests;
 public sealed class CoreTests
 {
     [Fact]
-    public void Hub_commands_are_scoped_by_target()
-    {
-        var windows = HubService.BuildCommand(HubTarget.Windows, "start", AppConstants.WindowsProjectDir);
-        Assert.Equal("corepack", windows.FileName); Assert.Equal(["pnpm", "start"], windows.Arguments);
-        var wsl = HubService.BuildCommand(HubTarget.Wsl, "build", AppConstants.WslProjectDir);
-        Assert.Equal("wsl.exe", wsl.FileName); Assert.Contains("PORT=3001", wsl.Arguments);
-        Assert.Throws<ArgumentException>(() => HubService.BuildCommand(HubTarget.Windows, "anything", "x"));
-    }
-
-    [Fact]
     public void Adb_device_output_is_parsed_with_partial_states()
     {
         var result = AdbService.ParseDevices("List of devices attached\nABC device product:p model:Pixel_9 device:tokay\nXYZ unauthorized usb:1");

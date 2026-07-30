@@ -2,9 +2,6 @@ using System.Text.Json.Serialization;
 
 namespace MCPHub.Core;
 
-public sealed record HubProcessInfo(bool Running, int? Pid, bool NgrokRunning, int? NgrokPid,
-    string? Script, string? ProjectDir, int? LastExitCode, string LogTail, string HubLogTail, string NgrokLogTail);
-public sealed record EndpointReachability(bool Reachable, int? StatusCode, long LatencyMs, string Url, string Detail);
 public sealed record AdbDevice(string Serial, string Model, string Device, string State);
 public sealed record AdbCommandResult(bool Ok, string Command, string Stdout, string Stderr,
     IReadOnlyList<string> Lines, int? ExitCode, IReadOnlyList<string> Paths);
